@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useState, use } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -126,12 +126,9 @@ const mockProperties: Property[] = [
   },
 ]
 
-export default function PropertyDetailsPage() {
-  const params = useParams()
+export default function PropertyDetailsPage({ params }: { params: Promise<{ propertyId: string }> }) {
+  const { propertyId } = use(params)
   const router = useRouter()
-  const propertyId = params?.propertyId 
-    ? (Array.isArray(params.propertyId) ? params.propertyId[0] : params.propertyId)
-    : undefined
 
   // Find the property
   const property = propertyId ? mockProperties.find((p) => p.id === propertyId) : undefined
