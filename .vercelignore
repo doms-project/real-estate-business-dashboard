@@ -1,0 +1,34 @@
+# Vercel ignore file
+# Files/folders that should not be deployed
+
+# Development files
+*.md
+!README.md
+
+# Scripts
+*.sh
+
+# Documentation
+docs/
+SETUP.md
+START_SERVER.md
+UPGRADE_NODE.md
+AI_COACH_SETUP.md
+GHL_INTEGRATION.md
+VERCEL_DEPLOYMENT.md
+WORKFLOW.md
+
+# Local environment
+.env.local
+.env*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
