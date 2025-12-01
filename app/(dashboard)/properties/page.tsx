@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle } from "lucide-react"
+import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X } from "lucide-react"
 import { Property } from "@/types"
 import { useState, useMemo, useCallback, useRef } from "react"
 import Link from "next/link"
@@ -149,6 +149,8 @@ export default function PropertiesPage() {
   const [fieldMapping, setFieldMapping] = useState<PropertyFieldMapping>({})
   const [importError, setImportError] = useState<string>("")
   const [importSuccess, setImportSuccess] = useState<string>("")
+  const [editingCell, setEditingCell] = useState<{ propertyId: string; field: string } | null>(null)
+  const [editValue, setEditValue] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Calculate monthly total costs
@@ -293,6 +295,190 @@ export default function PropertiesPage() {
 
   const formatPercentage = (value: number) => {
     return `${value.toFixed(2)}%`
+  }
+
+  // Handle delete property
+  const handleDeleteProperty = (propertyId: string) => {
+    if (confirm("Are you sure you want to delete this property? This action cannot be undone.")) {
+      setProperties(properties.filter((p) => p.id !== propertyId))
+    }
+  }
+
+  // Handle inline editing
+  const handleCellClick = (propertyId: string, field: string, currentValue: any, rawValue?: any) => {
+    // Don't allow editing calculated fields
+    if (field === "monthlyCosts" || field === "monthlyCashflow" || field === "roe") {
+      return
+    }
+    
+    setEditingCell({ propertyId, field })
+    // Use rawValue if provided (for formatted currency/percentage), otherwise use currentValue
+    const valueToEdit = rawValue !== undefined ? rawValue : currentValue
+    if (typeof valueToEdit === "number") {
+      setEditValue(valueToEdit.toString())
+    } else {
+      setEditValue(String(valueToEdit || ""))
+    }
+  }
+
+  const handleCellSave = () => {
+    if (!editingCell) return
+
+    const { propertyId, field } = editingCell
+    const property = properties.find((p) => p.id === propertyId)
+    if (!property) return
+
+    const updatedProperties = properties.map((p) => {
+      if (p.id === propertyId) {
+        const updated = { ...p }
+        
+        // Handle different field types
+        if (field === "status") {
+          if (["rented", "vacant", "under_maintenance", "sold"].includes(editValue.toLowerCase())) {
+            updated.status = editValue.toLowerCase() as Property["status"]
+          }
+        } else if (
+          [
+            "purchasePrice",
+            "currentEstValue",
+            "monthlyMortgagePayment",
+            "monthlyInsurance",
+            "monthlyPropertyTax",
+            "monthlyOtherCosts",
+            "monthlyGrossRent",
+          ].includes(field)
+        ) {
+          const numValue = parseFloat(editValue.replace(/[$,\s]/g, ""))
+          if (!isNaN(numValue)) {
+            ;(updated as any)[field] = numValue
+          }
+        } else if (field === "address" || field === "type" || field === "mortgageHolder") {
+          ;(updated as any)[field] = editValue
+        }
+        
+        return updated
+      }
+      return p
+    })
+
+    setProperties(updatedProperties)
+    setEditingCell(null)
+    setEditValue("")
+  }
+
+  const handleCellCancel = () => {
+    setEditingCell(null)
+    setEditValue("")
+  }
+
+  // Render editable cell
+  const renderEditableCell = (
+    propertyId: string,
+    field: string,
+    displayValue: any,
+    rawValue: any,
+    isEditable: boolean = true,
+    className: string = ""
+  ) => {
+    const isEditing = editingCell?.propertyId === propertyId && editingCell?.field === field
+
+    if (!isEditable) {
+      // Read-only cell (calculated values)
+      return <span className={className}>{displayValue}</span>
+    }
+
+    if (isEditing) {
+      if (field === "status") {
+        return (
+          <div className="flex items-center gap-1">
+            <Select
+              value={editValue}
+              onValueChange={setEditValue}
+              onOpenChange={(open) => {
+                if (!open) {
+                  // When select closes, save
+                  handleCellSave()
+                }
+              }}
+            >
+              <SelectTrigger className="h-8 w-32" id={`edit-${propertyId}-${field}`} name={`edit-${propertyId}-${field}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="rented">Rented</SelectItem>
+                <SelectItem value="vacant">Vacant</SelectItem>
+                <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
+                <SelectItem value="sold">Sold</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCellSave}
+              className="h-8 w-8 p-0"
+            >
+              <Check className="h-4 w-4 text-green-600" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCellCancel}
+              className="h-8 w-8 p-0"
+            >
+              <X className="h-4 w-4 text-red-600" />
+            </Button>
+          </div>
+        )
+      }
+
+      return (
+        <div className="flex items-center gap-1">
+          <Input
+            id={`edit-${propertyId}-${field}`}
+            name={`edit-${propertyId}-${field}`}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleCellSave}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                handleCellSave()
+              } else if (e.key === "Escape") {
+                handleCellCancel()
+              }
+            }}
+            className="h-8 w-32"
+            autoFocus
+            type={typeof rawValue === "number" ? "number" : "text"}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCellSave}
+            className="h-8 w-8 p-0"
+          >
+            <Check className="h-4 w-4 text-green-600" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCellCancel}
+            className="h-8 w-8 p-0"
+          >
+            <X className="h-4 w-4 text-red-600" />
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <span
+        className={`cursor-pointer hover:bg-muted/50 rounded px-1 transition-colors ${className}`}
+        onClick={() => handleCellClick(propertyId, field, displayValue, rawValue)}
+        title="Click to edit"
+      >
+        {displayValue}
+      </span>
+    )
   }
 
   // Export functions
@@ -772,6 +958,7 @@ export default function PropertiesPage() {
                 </div>
               </TableHead>
               <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="w-12"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -802,25 +989,64 @@ export default function PropertiesPage() {
                           <Star className="h-4 w-4 text-green-500 fill-green-500" />
                         </span>
                       )}
-                      {property.address}
+                      {renderEditableCell(
+                        property.id,
+                        "address",
+                        property.address,
+                        property.address,
+                        true,
+                        "font-medium"
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={getStatusBadgeVariant(property.status)}>
-                      {property.status.replace("_", " ")}
-                    </Badge>
+                    {editingCell?.propertyId === property.id && editingCell?.field === "status" ? (
+                      renderEditableCell(property.id, "status", property.status, property.status, true)
+                    ) : (
+                      <Badge
+                        variant={getStatusBadgeVariant(property.status)}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => handleCellClick(property.id, "status", property.status, property.status)}
+                      >
+                        {property.status.replace("_", " ")}
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(property.currentEstValue)}
+                    {renderEditableCell(
+                      property.id,
+                      "currentEstValue",
+                      formatCurrency(property.currentEstValue),
+                      property.currentEstValue,
+                      true
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(property.purchasePrice)}
+                    {renderEditableCell(
+                      property.id,
+                      "purchasePrice",
+                      formatCurrency(property.purchasePrice),
+                      property.purchasePrice,
+                      true
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(property.monthlyGrossRent)}
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyGrossRent",
+                      formatCurrency(property.monthlyGrossRent),
+                      property.monthlyGrossRent,
+                      true
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(monthlyCosts)}
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyCosts",
+                      formatCurrency(monthlyCosts),
+                      monthlyCosts,
+                      false
+                    )}
                   </TableCell>
                   <TableCell
                     className={`text-right font-semibold ${
@@ -829,10 +1055,16 @@ export default function PropertiesPage() {
                         : "text-red-600 dark:text-red-400"
                     }`}
                   >
-                    {formatCurrency(monthlyCashflow)}
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyCashflow",
+                      formatCurrency(monthlyCashflow),
+                      monthlyCashflow,
+                      false
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatPercentage(roe)}
+                    {renderEditableCell(property.id, "roe", formatPercentage(roe), roe, false)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Link href={`/properties/${property.id}/details`}>
@@ -841,6 +1073,16 @@ export default function PropertiesPage() {
                         Details
                       </Button>
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeleteProperty(property.id)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               )
@@ -866,6 +1108,7 @@ export default function PropertiesPage() {
               >
                 {formatCurrency(portfolioTotals.totalMonthlyCashflow)}
               </TableCell>
+              <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
             </TableRow>
