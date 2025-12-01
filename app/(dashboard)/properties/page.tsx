@@ -662,6 +662,8 @@ export default function PropertiesPage() {
           </Button>
           <input
             ref={fileInputRef}
+            id="csvFileInput"
+            name="csvFileInput"
             type="file"
             accept=".csv,.txt"
             onChange={handleFileUpload}
@@ -686,6 +688,8 @@ export default function PropertiesPage() {
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">Filter by status:</span>
         <select
+          id="statusFilter"
+          name="statusFilter"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="px-3 py-1 border rounded-md text-sm"
@@ -953,7 +957,11 @@ export default function PropertiesPage() {
                               }
                             }}
                           >
-                            <SelectTrigger className="w-64">
+                            <SelectTrigger
+                              className="w-64"
+                              id={`csv-mapping-${header}`}
+                              name={`csv-mapping-${header}`}
+                            >
                               <SelectValue placeholder="Select field..." />
                             </SelectTrigger>
                             <SelectContent>
@@ -965,6 +973,11 @@ export default function PropertiesPage() {
                               <SelectItem value="__unmapped">Unmapped / Ignore</SelectItem>
                             </SelectContent>
                           </Select>
+                          <input
+                            type="hidden"
+                            name={`csv-mapping-${header}`}
+                            value={currentMapping || ""}
+                          />
                         </div>
                       )
                     })
