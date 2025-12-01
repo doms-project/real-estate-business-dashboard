@@ -101,13 +101,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Insert new properties
-    const propertiesToInsert = properties.map((prop: any) => {
+    const propertiesToInsert = properties.map((prop: any, index: number) => {
       // Validate required fields
       if (!prop.address || !prop.type || !prop.status) {
-        throw new Error(`Property missing required fields: address, type, or status`)
+        throw new Error(`Property at index ${index} missing required fields: address="${prop.address}", type="${prop.type}", status="${prop.status}"`)
       }
 
-      return {
+      // Validate status is one of the allowed values
+      const validStatuses = ['rented', 'vacant', 'under_maintenance', 'sold']
+      if (!validStatuses.includes(prop.status)) {
+        throw new Error(`Property at index ${index} has invalid status: "${prop.status}". Must be one of: ${validStatuses.join(', ')}`)
+      }
+
+      // Build the property object, excluding fields that don't belong in the properties table
+      const propertyToInsert: any = {
         user_id: userId,
         workspace_id: workspaceId || null,
         address: String(prop.address).trim(),
@@ -122,8 +129,15 @@ export async function POST(request: NextRequest) {
         monthly_other_costs: Number(prop.monthlyOtherCosts) || 0,
         monthly_gross_rent: Number(prop.monthlyGrossRent) || 0,
         ownership: prop.ownership ? String(prop.ownership).trim() : null,
-        linked_websites: Array.isArray(prop.linkedWebsites) ? prop.linkedWebsites : null,
+        linked_websites: Array.isArray(prop.linkedWebsites) && prop.linkedWebsites.length > 0 ? prop.linkedWebsites : null,
       }
+
+      // Note: We intentionally exclude:
+      // - id (database generates it)
+      // - rentRoll (stored in rent_roll_units table)
+      // - workRequests (stored in work_requests table)
+
+      return propertyToInsert
     })
 
     if (propertiesToInsert.length === 0) {
