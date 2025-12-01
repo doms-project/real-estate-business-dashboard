@@ -207,7 +207,10 @@ export default function PropertyDetailsPage() {
   }
 
   const handlePropertyFieldChange = (field: keyof Property, value: any) => {
-    setPropertyData((prev) => ({ ...prev, [field]: value }))
+    setPropertyData((prev) => {
+      if (!prev) return null
+      return { ...prev, [field]: value }
+    })
   }
 
   const handleSaveProperty = () => {

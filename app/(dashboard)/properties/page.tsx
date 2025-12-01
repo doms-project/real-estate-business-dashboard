@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Plus, ArrowUpDown, Edit } from "lucide-react"
 import { Property } from "@/types"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import Link from "next/link"
 
 // Mock data with new fields
@@ -119,19 +119,19 @@ export default function PropertiesPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
 
   // Calculate monthly total costs
-  const calculateMonthlyCosts = (property: Property): number => {
+  const calculateMonthlyCosts = useCallback((property: Property): number => {
     return (
       property.monthlyMortgagePayment +
       property.monthlyInsurance +
       property.monthlyPropertyTax +
       property.monthlyOtherCosts
     )
-  }
+  }, [])
 
   // Calculate monthly cashflow
-  const calculateMonthlyCashflow = (property: Property): number => {
+  const calculateMonthlyCashflow = useCallback((property: Property): number => {
     return property.monthlyGrossRent - calculateMonthlyCosts(property)
-  }
+  }, [calculateMonthlyCosts])
 
   // Calculate Return on Equity (ROE)
   const calculateROE = (property: Property): number => {
