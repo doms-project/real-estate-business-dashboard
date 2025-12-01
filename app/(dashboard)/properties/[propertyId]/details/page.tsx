@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { Property, RentRollUnit, WorkRequest } from "@/types"
 import { ArrowLeft, Plus, Trash2, Save, Upload, FileText, Star, AlertCircle } from "lucide-react"
+import { SaveButton } from "@/components/ui/save-button"
 
 // Mock data - in production, this would come from an API
 const mockProperties: Property[] = [
@@ -145,6 +146,49 @@ export default function PropertyDetailsPage() {
   )
   const [newUnit, setNewUnit] = useState<Partial<RentRollUnit>>({})
   const [newWorkRequest, setNewWorkRequest] = useState<Partial<WorkRequest>>({})
+
+  const handleSaveProperty = async () => {
+    if (!propertyData || !propertyId) {
+      throw new Error('Property data or ID missing')
+    }
+
+    try {
+      // Save main property data
+      const response = await fetch(`/api/properties/${propertyId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          address: propertyData.address,
+          type: propertyData.type,
+          status: propertyData.status,
+          mortgageHolder: propertyData.mortgageHolder,
+          purchasePrice: propertyData.purchasePrice,
+          currentEstValue: propertyData.currentEstValue,
+          monthlyMortgagePayment: propertyData.monthlyMortgagePayment,
+          monthlyInsurance: propertyData.monthlyInsurance,
+          monthlyPropertyTax: propertyData.monthlyPropertyTax,
+          monthlyOtherCosts: propertyData.monthlyOtherCosts,
+          monthlyGrossRent: propertyData.monthlyGrossRent,
+          ownership: propertyData.ownership,
+          linkedWebsites: propertyData.linkedWebsites,
+        }),
+      })
+
+      if (response.ok) {
+        // TODO: Save rent roll units and work requests separately
+        // For now, just save the main property
+        return // Success - SaveButton will show success state
+      } else {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to save property')
+      }
+    } catch (error: any) {
+      console.error('Error saving property:', error)
+      throw error // Re-throw so SaveButton can handle it
+    }
+  }
 
   // Early return after all hooks
   if (!property || !propertyData) {
@@ -363,7 +407,7 @@ export default function PropertyDetailsPage() {
             </div>
           </div>
         </div>
-        <Button onClick={handleSaveProperty}>
+        <SaveButton onSave={handleSaveProperty} />
           <Save className="mr-2 h-4 w-4" />
           Save Changes
         </Button>
