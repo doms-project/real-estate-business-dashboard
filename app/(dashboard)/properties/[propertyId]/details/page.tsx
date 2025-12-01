@@ -257,12 +257,6 @@ export default function PropertyDetailsPage() {
     })
   }
 
-  const handleSaveProperty = () => {
-    // In production, this would save to an API
-    console.log("Saving property:", propertyData)
-    alert("Property saved! (In production, this would save to your database)")
-  }
-
   const handleAddUnit = () => {
     if (
       newUnit.unitName &&
