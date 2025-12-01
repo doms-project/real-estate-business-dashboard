@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Property, RentRollUnit, WorkRequest } from "@/types"
-import { ArrowLeft, Plus, Trash2, Save, Upload, FileText } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Save, Upload, FileText, Star, AlertCircle } from "lucide-react"
 
 // Mock data - in production, this would come from an API
 const mockProperties: Property[] = [
@@ -308,6 +308,18 @@ export default function PropertyDetailsPage() {
     }
   }
 
+  // Calculate property health indicators
+  const pendingWorkRequests = workRequests.filter(
+    (wr) => wr.status === "new" || wr.status === "in_progress"
+  ).length
+
+  const hasNegativeCashflow = calculateMonthlyCashflow() < 0
+  const needsAttention = hasNegativeCashflow || pendingWorkRequests > 0
+  const isHealthy = !needsAttention && calculateMonthlyCashflow() > 0
+
+  // Get work request count for badge
+  const workRequestCount = workRequests.length
+
   return (
     <div className="p-8 space-y-6">
       {/* Header */}
@@ -320,16 +332,35 @@ export default function PropertyDetailsPage() {
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              {propertyData.address}
-            </h1>
-            <p className="text-muted-foreground">
-              {propertyData.type} •{" "}
-              <Badge variant={getStatusBadgeVariant(propertyData.status)}>
-                {propertyData.status.replace("_", " ")}
-              </Badge>
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+                {propertyData.address}
+                {needsAttention && (
+                  <Star className="h-6 w-6 text-red-500 fill-red-500" />
+                )}
+                {isHealthy && (
+                  <Star className="h-6 w-6 text-green-500 fill-green-500" />
+                )}
+              </h1>
+              <p className="text-muted-foreground">
+                {propertyData.type} •{" "}
+                <Badge variant={getStatusBadgeVariant(propertyData.status)}>
+                  {propertyData.status.replace("_", " ")}
+                </Badge>
+                {needsAttention && (
+                  <span className="ml-2 text-sm text-red-600 dark:text-red-400 flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4" />
+                    Needs Attention
+                  </span>
+                )}
+                {isHealthy && (
+                  <span className="ml-2 text-sm text-green-600 dark:text-green-400">
+                    All Good
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
         </div>
         <Button onClick={handleSaveProperty}>
@@ -343,7 +374,14 @@ export default function PropertyDetailsPage() {
         <TabsList>
           <TabsTrigger value="financial">Financial</TabsTrigger>
           <TabsTrigger value="rentroll">Rent Roll</TabsTrigger>
-          <TabsTrigger value="workrequests">Work Requests</TabsTrigger>
+          <TabsTrigger value="workrequests" className="relative">
+            Work Requests
+            {workRequestCount > 0 && (
+              <span className="ml-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white">
+                {workRequestCount}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 

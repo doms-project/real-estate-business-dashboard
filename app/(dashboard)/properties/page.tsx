@@ -11,9 +11,26 @@ import {
   TableFooter,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Plus, ArrowUpDown, Edit } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle } from "lucide-react"
 import { Property } from "@/types"
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useRef } from "react"
 import Link from "next/link"
 
 // Mock data with new fields
@@ -117,6 +134,12 @@ export default function PropertiesPage() {
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [properties, setProperties] = useState<Property[]>(mockProperties)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [csvData, setCsvData] = useState<string[][]>([])
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([])
+  const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({})
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Calculate monthly total costs
   const calculateMonthlyCosts = useCallback((property: Property): number => {
@@ -143,12 +166,12 @@ export default function PropertiesPage() {
 
   // Filter properties
   const filteredProperties = useMemo(() => {
-    let filtered = mockProperties
+    let filtered = properties
     if (statusFilter !== "all") {
       filtered = filtered.filter((p) => p.status === statusFilter)
     }
     return filtered
-  }, [statusFilter])
+  }, [properties, statusFilter])
 
   // Sort properties
   const sortedProperties = useMemo(() => {
@@ -262,6 +285,220 @@ export default function PropertiesPage() {
     return `${value.toFixed(2)}%`
   }
 
+  // Export functions
+  const exportToCSV = () => {
+    const headers = [
+      "Address",
+      "Type",
+      "Status",
+      "Mortgage Holder",
+      "Purchase Price",
+      "Current Est. Value",
+      "Monthly Mortgage Payment",
+      "Monthly Insurance",
+      "Monthly Property Tax",
+      "Monthly Other Costs",
+      "Monthly Gross Rent",
+    ]
+
+    const rows = properties.map((p) => [
+      p.address,
+      p.type,
+      p.status,
+      p.mortgageHolder || "",
+      p.purchasePrice.toString(),
+      p.currentEstValue.toString(),
+      p.monthlyMortgagePayment.toString(),
+      p.monthlyInsurance.toString(),
+      p.monthlyPropertyTax.toString(),
+      p.monthlyOtherCosts.toString(),
+      p.monthlyGrossRent.toString(),
+    ])
+
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${cell}"`).join(","))
+      .join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `properties_export_${new Date().toISOString().split("T")[0]}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const exportToJSON = () => {
+    const jsonContent = JSON.stringify(properties, null, 2)
+    const blob = new Blob([jsonContent], { type: "application/json" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    link.setAttribute("download", `properties_export_${new Date().toISOString().split("T")[0]}.json`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  // Import functions
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      parseCSV(text)
+    }
+    reader.readAsText(file)
+  }
+
+  const parseCSV = (text: string) => {
+    const lines = text.split("\n").filter((line) => line.trim())
+    if (lines.length === 0) return
+
+    const parsed = lines.map((line) => {
+      const result: string[] = []
+      let current = ""
+      let inQuotes = false
+
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i]
+        if (char === '"') {
+          inQuotes = !inQuotes
+        } else if (char === "," && !inQuotes) {
+          result.push(current.trim())
+          current = ""
+        } else {
+          current += char
+        }
+      }
+      result.push(current.trim())
+      return result
+    })
+
+    const headers = parsed[0].map((h) => h.replace(/^"|"$/g, ""))
+    const data = parsed.slice(1)
+
+    setCsvHeaders(headers)
+    setCsvData(data)
+    
+    // Auto-map fields based on header names
+    const autoMapping: Record<string, string> = {}
+    const propertyFields = [
+      "address",
+      "type",
+      "status",
+      "mortgageHolder",
+      "purchasePrice",
+      "currentEstValue",
+      "monthlyMortgagePayment",
+      "monthlyInsurance",
+      "monthlyPropertyTax",
+      "monthlyOtherCosts",
+      "monthlyGrossRent",
+    ]
+
+    headers.forEach((header) => {
+      const normalizedHeader = header.toLowerCase().replace(/\s+/g, "")
+      const matchedField = propertyFields.find((field) => {
+        const normalizedField = field.replace(/([A-Z])/g, " $1").toLowerCase().trim()
+        return (
+          normalizedHeader.includes(normalizedField) ||
+          normalizedField.includes(normalizedHeader) ||
+          header.toLowerCase().includes(field.toLowerCase())
+        )
+      })
+      if (matchedField) {
+        autoMapping[header] = matchedField
+      }
+    })
+
+    setFieldMapping(autoMapping)
+    setImportDialogOpen(true)
+  }
+
+  const handleImport = () => {
+    const importedProperties: Property[] = csvData.map((row, index) => {
+      const property: Partial<Property> = {
+        id: `imported-${Date.now()}-${index}`,
+        address: "",
+        type: "",
+        status: "vacant",
+        purchasePrice: 0,
+        currentEstValue: 0,
+        monthlyMortgagePayment: 0,
+        monthlyInsurance: 0,
+        monthlyPropertyTax: 0,
+        monthlyOtherCosts: 0,
+        monthlyGrossRent: 0,
+        rentRoll: [],
+        workRequests: [],
+      }
+
+      csvHeaders.forEach((header, colIndex) => {
+        const mappedField = fieldMapping[header]
+        if (mappedField && row[colIndex]) {
+          const value = row[colIndex].replace(/^"|"$/g, "")
+          
+          if (mappedField === "status") {
+            const statusValue = value.toLowerCase()
+            if (["rented", "vacant", "under_maintenance", "sold"].includes(statusValue)) {
+              property[mappedField] = statusValue as Property["status"]
+            }
+          } else if (
+            [
+              "purchasePrice",
+              "currentEstValue",
+              "monthlyMortgagePayment",
+              "monthlyInsurance",
+              "monthlyPropertyTax",
+              "monthlyOtherCosts",
+              "monthlyGrossRent",
+            ].includes(mappedField)
+          ) {
+            const numValue = parseFloat(value.replace(/[^0-9.-]/g, ""))
+            if (!isNaN(numValue)) {
+              property[mappedField as keyof Property] = numValue as any
+            }
+          } else {
+            property[mappedField as keyof Property] = value as any
+          }
+        }
+      })
+
+      return property as Property
+    })
+
+    setProperties([...properties, ...importedProperties])
+    setImportDialogOpen(false)
+    setCsvData([])
+    setCsvHeaders([])
+    setFieldMapping({})
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+    alert(`Successfully imported ${importedProperties.length} properties!`)
+  }
+
+  const propertyFields = [
+    { value: "", label: "Skip this column" },
+    { value: "address", label: "Address" },
+    { value: "type", label: "Type" },
+    { value: "status", label: "Status" },
+    { value: "mortgageHolder", label: "Mortgage Holder" },
+    { value: "purchasePrice", label: "Purchase Price" },
+    { value: "currentEstValue", label: "Current Est. Value" },
+    { value: "monthlyMortgagePayment", label: "Monthly Mortgage Payment" },
+    { value: "monthlyInsurance", label: "Monthly Insurance" },
+    { value: "monthlyPropertyTax", label: "Monthly Property Tax" },
+    { value: "monthlyOtherCosts", label: "Monthly Other Costs" },
+    { value: "monthlyGrossRent", label: "Monthly Gross Rent" },
+  ]
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
@@ -273,10 +510,31 @@ export default function PropertiesPage() {
             Portfolio overview and financial tracking
           </p>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Property
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="mr-2 h-4 w-4" />
+            Import
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.txt"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <Button variant="outline" onClick={exportToCSV}>
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+          <Button variant="outline" onClick={exportToJSON}>
+            <FileText className="mr-2 h-4 w-4" />
+            Export JSON
+          </Button>
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Property
+          </Button>
+        </div>
       </div>
 
       {/* Status Filter */}
@@ -372,11 +630,31 @@ export default function PropertiesPage() {
               const monthlyCosts = calculateMonthlyCosts(property)
               const monthlyCashflow = calculateMonthlyCashflow(property)
               const roe = calculateROE(property)
+              
+              // Check if property needs attention
+              const pendingWorkRequests = property.workRequests?.filter(
+                (wr) => wr.status === "new" || wr.status === "in_progress"
+              ).length || 0
+              const hasNegativeCashflow = monthlyCashflow < 0
+              const needsAttention = hasNegativeCashflow || pendingWorkRequests > 0
+              const isHealthy = !needsAttention && monthlyCashflow > 0
 
               return (
                 <TableRow key={property.id}>
                   <TableCell className="font-medium">
-                    {property.address}
+                    <div className="flex items-center gap-2">
+                      {needsAttention && (
+                        <span title="Needs Attention">
+                          <Star className="h-4 w-4 text-red-500 fill-red-500" />
+                        </span>
+                      )}
+                      {isHealthy && (
+                        <span title="All Good">
+                          <Star className="h-4 w-4 text-green-500 fill-green-500" />
+                        </span>
+                      )}
+                      {property.address}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={getStatusBadgeVariant(property.status)}>
@@ -445,6 +723,88 @@ export default function PropertiesPage() {
           </TableFooter>
         </Table>
       </div>
+
+      {/* Import Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Import Properties from CSV</DialogTitle>
+            <DialogDescription>
+              Map CSV columns to property fields. You can preview the first few rows below.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Field Mapping */}
+            <div className="space-y-2">
+              <Label>Field Mapping</Label>
+              <div className="border rounded-lg p-4 space-y-2 max-h-96 overflow-y-auto">
+                {csvHeaders.map((header, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <div className="flex-1 text-sm font-medium">{header}</div>
+                    <div className="text-sm text-muted-foreground">→</div>
+                    <Select
+                      value={fieldMapping[header] || ""}
+                      onValueChange={(value) =>
+                        setFieldMapping({ ...fieldMapping, [header]: value })
+                      }
+                    >
+                      <SelectTrigger className="w-64">
+                        <SelectValue placeholder="Select field..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {propertyFields.map((field) => (
+                          <SelectItem key={field.value} value={field.value}>
+                            {field.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Preview */}
+            {csvData.length > 0 && (
+              <div className="space-y-2">
+                <Label>Preview (first 3 rows)</Label>
+                <div className="border rounded-lg overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {csvHeaders.map((header, index) => (
+                          <TableHead key={index} className="text-xs">
+                            {header}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {csvData.slice(0, 3).map((row, rowIndex) => (
+                        <TableRow key={rowIndex}>
+                          {row.map((cell, cellIndex) => (
+                            <TableCell key={cellIndex} className="text-xs">
+                              {cell.replace(/^"|"$/g, "").substring(0, 30)}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleImport} disabled={csvData.length === 0}>
+              Import {csvData.length} Properties
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
