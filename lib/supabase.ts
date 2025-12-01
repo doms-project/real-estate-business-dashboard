@@ -1,8 +1,13 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || ''
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || ''
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || ''
+
+// Validate Supabase URL format
+if (supabaseUrl && !supabaseUrl.match(/^https?:\/\//)) {
+  throw new Error(`Invalid NEXT_PUBLIC_SUPABASE_URL format: "${supabaseUrl}". Must be a valid HTTP or HTTPS URL.`)
+}
 
 /**
  * Client-side Supabase client
