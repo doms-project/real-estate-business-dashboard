@@ -32,6 +32,14 @@ import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle 
 import { Property } from "@/types"
 import { useState, useMemo, useCallback, useRef } from "react"
 import Link from "next/link"
+import {
+  PropertyField,
+  PropertyFieldMapping,
+  generateInitialMapping,
+  mapCsvRowToProperty,
+  validateMapping,
+  REQUIRED_FIELDS,
+} from "@/lib/csv-import"
 
 // Mock data with new fields
 const mockProperties: Property[] = [
@@ -138,7 +146,7 @@ export default function PropertiesPage() {
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvData, setCsvData] = useState<string[][]>([])
   const [csvHeaders, setCsvHeaders] = useState<string[]>([])
-  const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({})
+  const [fieldMapping, setFieldMapping] = useState<PropertyFieldMapping>({})
   const [importError, setImportError] = useState<string>("")
   const [importSuccess, setImportSuccess] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -427,6 +435,9 @@ export default function PropertiesPage() {
 
   const parseCSV = (text: string) => {
     try {
+      setImportError("")
+      setImportSuccess("")
+
       // Handle different line endings (Windows \r\n, Mac \r, Unix \n)
       const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
       const lines = normalizedText.split("\n").filter((line) => line.trim().length > 0)
@@ -441,6 +452,7 @@ export default function PropertiesPage() {
         return
       }
 
+      // Parse CSV rows with proper quote handling
       const parsed = lines.map((line) => {
         const result: string[] = []
         let current = ""
@@ -469,15 +481,34 @@ export default function PropertiesPage() {
         return result
       })
 
-      const headers = parsed[0].map((h) => h.replace(/^["']|["']$/g, "").trim())
-      const data = parsed.slice(1).filter((row) => row.some((cell) => cell.trim().length > 0))
+      // Extract headers and clean them
+      const headers = parsed[0]
+        .map((h) => h.replace(/^["']|["']$/g, "").trim())
+        .filter((h) => h.length > 0) // Filter out empty headers
 
       if (headers.length === 0) {
-        setImportError("No headers found in CSV file")
+        setImportError("No valid headers found in CSV file")
         return
       }
 
-      // Check if all rows have the same number of columns
+      // Extract data rows, padding with empty strings if needed
+      const data = parsed.slice(1)
+        .map((row) => {
+          // Pad row to match header length
+          const padded = [...row]
+          while (padded.length < headers.length) {
+            padded.push("")
+          }
+          return padded.slice(0, headers.length)
+        })
+        .filter((row) => row.some((cell) => cell && cell.trim().length > 0)) // Filter completely empty rows
+
+      if (data.length === 0) {
+        setImportError("No data rows found in CSV file")
+        return
+      }
+
+      // Check for column count mismatches (warning only)
       const expectedColumns = headers.length
       const invalidRows = data.filter((row) => row.length !== expectedColumns)
       if (invalidRows.length > 0) {
@@ -487,51 +518,14 @@ export default function PropertiesPage() {
       setCsvHeaders(headers)
       setCsvData(data)
       
-      // Auto-map fields based on header names
-      const autoMapping: Record<string, string> = {}
-      const propertyFields = [
-        "address",
-        "type",
-        "status",
-        "mortgageHolder",
-        "purchasePrice",
-        "currentEstValue",
-        "monthlyMortgagePayment",
-        "monthlyInsurance",
-        "monthlyPropertyTax",
-        "monthlyOtherCosts",
-        "monthlyGrossRent",
-      ]
-
-      headers.forEach((header) => {
-        const normalizedHeader = header.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")
-        const matchedField = propertyFields.find((field) => {
-          const normalizedField = field.replace(/([A-Z])/g, " $1").toLowerCase().trim().replace(/\s+/g, "")
-          const fieldVariations = [
-            normalizedField,
-            field.toLowerCase(),
-            field.replace(/([A-Z])/g, " $1").toLowerCase().trim(),
-          ]
-          
-          return (
-            normalizedHeader === normalizedField ||
-            normalizedHeader.includes(normalizedField) ||
-            normalizedField.includes(normalizedHeader) ||
-            fieldVariations.some(v => normalizedHeader.includes(v) || v.includes(normalizedHeader)) ||
-            header.toLowerCase().includes(field.toLowerCase()) ||
-            field.toLowerCase().includes(header.toLowerCase())
-          )
-        })
-        if (matchedField) {
-          autoMapping[header] = matchedField
-        }
-      })
-
-      setFieldMapping(autoMapping)
+      // Generate initial mapping using utility function
+      const initialMapping = generateInitialMapping(headers)
+      setFieldMapping(initialMapping)
+      
       setImportDialogOpen(true)
-      setImportError("")
     } catch (error) {
       setImportError(`Error parsing CSV: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error("CSV parsing error:", error)
     }
   }
 
@@ -540,89 +534,68 @@ export default function PropertiesPage() {
       setImportError("")
       setImportSuccess("")
 
-      // Validate that at least address is mapped
-      const addressMapped = Object.values(fieldMapping).includes("address")
-      if (!addressMapped) {
-        setImportError("Please map at least the 'Address' field to import properties")
+      // Validate required fields are mapped
+      const validation = validateMapping(fieldMapping)
+      if (!validation.valid) {
+        const missingFields = validation.missingFields
+          .map((field) => {
+            // Convert camelCase to readable format
+            return field.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase())
+          })
+          .join(", ")
+        setImportError(`Your CSV is missing mappings for: ${missingFields}. Please select a column for each required field.`)
+        return
+      }
+
+      // Validate CSV data structure
+      if (!Array.isArray(csvData) || csvData.length === 0) {
+        setImportError("No data rows found to import")
+        return
+      }
+
+      if (!Array.isArray(csvHeaders) || csvHeaders.length === 0) {
+        setImportError("No headers found in CSV")
         return
       }
 
       const importedProperties: Property[] = []
       const errors: string[] = []
 
+      // Process each row safely
       csvData.forEach((row, index) => {
-        const property: Partial<Property> = {
-          id: `imported-${Date.now()}-${index}`,
-          address: "",
-          type: "",
-          status: "vacant",
-          purchasePrice: 0,
-          currentEstValue: 0,
-          monthlyMortgagePayment: 0,
-          monthlyInsurance: 0,
-          monthlyPropertyTax: 0,
-          monthlyOtherCosts: 0,
-          monthlyGrossRent: 0,
-          rentRoll: [],
-          workRequests: [],
-        }
+        try {
+          // Use utility function to safely map row to property
+          const propertyPartial = mapCsvRowToProperty(row, csvHeaders, fieldMapping)
 
-        csvHeaders.forEach((header, colIndex) => {
-          const mappedField = fieldMapping[header]
-          if (mappedField && mappedField !== "" && row[colIndex] !== undefined) {
-            let value = row[colIndex]?.replace(/^["']|["']$/g, "").trim() || ""
-            
-            if (!value) return // Skip empty values
-            
-            if (mappedField === "status") {
-              const statusValue = value.toLowerCase().trim()
-              // More flexible status matching
-              const statusMap: Record<string, Property["status"]> = {
-                "rented": "rented",
-                "rent": "rented",
-                "occupied": "rented",
-                "vacant": "vacant",
-                "vacancy": "vacant",
-                "empty": "vacant",
-                "under_maintenance": "under_maintenance",
-                "maintenance": "under_maintenance",
-                "repair": "under_maintenance",
-                "sold": "sold",
-                "sale": "sold",
-              }
-              property[mappedField] = statusMap[statusValue] || "vacant"
-            } else if (
-              [
-                "purchasePrice",
-                "currentEstValue",
-                "monthlyMortgagePayment",
-                "monthlyInsurance",
-                "monthlyPropertyTax",
-                "monthlyOtherCosts",
-                "monthlyGrossRent",
-              ].includes(mappedField)
-            ) {
-              // Remove currency symbols, commas, and whitespace
-              const cleanedValue = value.replace(/[$,\s]/g, "")
-              const numValue = parseFloat(cleanedValue)
-              if (!isNaN(numValue) && isFinite(numValue)) {
-                property[mappedField as keyof Property] = numValue as any
-              } else {
-                errors.push(`Row ${index + 1}: Invalid number for ${mappedField}: "${value}"`)
-              }
-            } else {
-              property[mappedField as keyof Property] = value as any
-            }
+          // Validate required fields
+          if (!propertyPartial.address || propertyPartial.address.trim() === "") {
+            errors.push(`Row ${index + 2}: Missing required field 'address'`)
+            return
           }
-        })
 
-        // Validate required fields
-        if (!property.address || property.address.trim() === "") {
-          errors.push(`Row ${index + 1}: Missing required field 'address'`)
-          return
+          // Create complete property with ID
+          const property: Property = {
+            id: `imported-${Date.now()}-${index}`,
+            address: propertyPartial.address || "",
+            type: propertyPartial.type || "",
+            status: propertyPartial.status || "vacant",
+            mortgageHolder: propertyPartial.mortgageHolder,
+            purchasePrice: propertyPartial.purchasePrice || 0,
+            currentEstValue: propertyPartial.currentEstValue || 0,
+            monthlyMortgagePayment: propertyPartial.monthlyMortgagePayment || 0,
+            monthlyInsurance: propertyPartial.monthlyInsurance || 0,
+            monthlyPropertyTax: propertyPartial.monthlyPropertyTax || 0,
+            monthlyOtherCosts: propertyPartial.monthlyOtherCosts || 0,
+            monthlyGrossRent: propertyPartial.monthlyGrossRent || 0,
+            rentRoll: propertyPartial.rentRoll || [],
+            workRequests: propertyPartial.workRequests || [],
+            linkedWebsites: propertyPartial.linkedWebsites,
+          }
+
+          importedProperties.push(property)
+        } catch (rowError) {
+          errors.push(`Row ${index + 2}: ${rowError instanceof Error ? rowError.message : 'Unknown error'}`)
         }
-
-        importedProperties.push(property as Property)
       })
 
       if (errors.length > 0 && importedProperties.length === 0) {
@@ -652,11 +625,12 @@ export default function PropertiesPage() {
       }, 2000)
     } catch (error) {
       setImportError(`Import error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error("Import error:", error)
     }
   }
 
-  const propertyFields = [
-    { value: "", label: "Skip this column" },
+  // Property field options for mapping (no empty string values)
+  const propertyFields: { value: PropertyField; label: string }[] = [
     { value: "address", label: "Address" },
     { value: "type", label: "Type" },
     { value: "status", label: "Status" },
@@ -939,38 +913,79 @@ export default function PropertiesPage() {
                     No headers detected. Please check your CSV file format.
                   </p>
                 ) : (
-                  csvHeaders.map((header, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <div className="flex-1 text-sm font-medium truncate" title={header}>
-                        {header}
-                      </div>
-                      <div className="text-sm text-muted-foreground">→</div>
-                      <Select
-                        value={fieldMapping[header] || ""}
-                        onValueChange={(value) =>
-                          setFieldMapping({ ...fieldMapping, [header]: value })
-                        }
-                      >
-                        <SelectTrigger className="w-64">
-                          <SelectValue placeholder="Select field..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {propertyFields.map((field) => (
-                            <SelectItem key={field.value} value={field.value}>
-                              {field.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ))
+                  csvHeaders
+                    .filter((h) => h && h.trim() !== "")
+                    .map((header, index) => {
+                      // Find which PropertyField is mapped to this header
+                      const currentMapping = Object.entries(fieldMapping).find(
+                        ([_, mappedHeader]) => mappedHeader === header
+                      )?.[0] as PropertyField | undefined
+
+                      return (
+                        <div key={`${header}-${index}`} className="flex items-center gap-2">
+                          <div className="flex-1 text-sm font-medium truncate" title={header}>
+                            {header}
+                          </div>
+                          <div className="text-sm text-muted-foreground">→</div>
+                          <Select
+                            value={currentMapping || undefined}
+                            onValueChange={(value) => {
+                              if (value === "__unmapped") {
+                                // Remove mapping - find and remove the entry
+                                const newMapping = { ...fieldMapping }
+                                Object.keys(newMapping).forEach((key) => {
+                                  if (newMapping[key as PropertyField] === header) {
+                                    delete newMapping[key as PropertyField]
+                                  }
+                                })
+                                setFieldMapping(newMapping)
+                              } else {
+                                // Set mapping - remove old mapping first if exists
+                                const newMapping = { ...fieldMapping }
+                                Object.keys(newMapping).forEach((key) => {
+                                  if (newMapping[key as PropertyField] === header) {
+                                    delete newMapping[key as PropertyField]
+                                  }
+                                })
+                                // Add new mapping
+                                newMapping[value as PropertyField] = header
+                                setFieldMapping(newMapping)
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="w-64">
+                              <SelectValue placeholder="Select field..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {propertyFields.map((field) => (
+                                <SelectItem key={field.value} value={field.value}>
+                                  {field.label}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="__unmapped">Unmapped / Ignore</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )
+                    })
                 )}
               </div>
-              {!Object.values(fieldMapping).includes("address") && csvHeaders.length > 0 && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ Please map at least the &quot;Address&quot; field to import properties
-                </p>
-              )}
+              {(() => {
+                const validation = validateMapping(fieldMapping)
+                if (!validation.valid && csvHeaders.length > 0) {
+                  const missingFields = validation.missingFields
+                    .map((field) => {
+                      return field.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase())
+                    })
+                    .join(", ")
+                  return (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      ⚠️ Please map the following required fields: {missingFields}
+                    </p>
+                  )
+                }
+                return null
+              })()}
             </div>
 
             {/* Preview */}
@@ -991,9 +1006,13 @@ export default function PropertiesPage() {
                     <TableBody>
                       {csvData.slice(0, 3).map((row, rowIndex) => (
                         <TableRow key={rowIndex}>
-                          {row.map((cell, cellIndex) => (
-                            <TableCell key={cellIndex} className="text-xs">
-                              {cell.replace(/^"|"$/g, "").substring(0, 30)}
+                          {csvHeaders.map((header, cellIndex) => (
+                            <TableCell key={`${header}-${cellIndex}`} className="text-xs">
+                              {row[cellIndex]
+                                ? String(row[cellIndex])
+                                    .replace(/^["']|["']$/g, "")
+                                    .substring(0, 30)
+                                : ""}
                             </TableCell>
                           ))}
                         </TableRow>
@@ -1008,7 +1027,10 @@ export default function PropertiesPage() {
             <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleImport} disabled={csvData.length === 0}>
+            <Button
+              onClick={handleImport}
+              disabled={csvData.length === 0 || !validateMapping(fieldMapping).valid}
+            >
               Import {csvData.length} Properties
             </Button>
           </DialogFooter>
