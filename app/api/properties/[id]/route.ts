@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
+import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
 /**
@@ -10,8 +10,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await currentUser()
-    const userId = user?.id
+    const { userId } = await auth()
     
     if (!userId) {
       return NextResponse.json(
