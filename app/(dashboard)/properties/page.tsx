@@ -35,10 +35,10 @@ import Link from "next/link"
 
 // Mock data with new fields
 const mockProperties: Property[] = [
-  {
-    id: "1",
-    address: "123 Main St, San Francisco, CA",
-    type: "Apartment",
+    {
+      id: "1",
+      address: "123 Main St, San Francisco, CA",
+      type: "Apartment",
     status: "rented",
     mortgageHolder: "Chase Bank",
     purchasePrice: 750000,
@@ -75,11 +75,11 @@ const mockProperties: Property[] = [
         cost: 150,
       },
     ],
-  },
-  {
-    id: "2",
-    address: "456 Oak Ave, Los Angeles, CA",
-    type: "House",
+    },
+    {
+      id: "2",
+      address: "456 Oak Ave, Los Angeles, CA",
+      type: "House",
     status: "rented",
     mortgageHolder: "Wells Fargo",
     purchasePrice: 1100000,
@@ -701,10 +701,10 @@ export default function PropertiesPage() {
             <FileText className="mr-2 h-4 w-4" />
             Export JSON
           </Button>
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Property
-          </Button>
+        <Button>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Property
+        </Button>
         </div>
       </div>
 
@@ -927,12 +927,12 @@ export default function PropertiesPage() {
             )}
             {/* Field Mapping */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between">
                 <Label>Field Mapping</Label>
                 <span className="text-xs text-muted-foreground">
                   {csvHeaders.length} columns detected
-                </span>
-              </div>
+                  </span>
+                </div>
               <div className="border rounded-lg p-4 space-y-2 max-h-96 overflow-y-auto">
                 {csvHeaders.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
@@ -968,7 +968,7 @@ export default function PropertiesPage() {
               </div>
               {!Object.values(fieldMapping).includes("address") && csvHeaders.length > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ Please map at least the "Address" field to import properties
+                  ⚠️ Please map at least the &quot;Address&quot; field to import properties
                 </p>
               )}
             </div>
@@ -1003,7 +1003,7 @@ export default function PropertiesPage() {
                 </div>
               </div>
             )}
-          </div>
+      </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
               Cancel
