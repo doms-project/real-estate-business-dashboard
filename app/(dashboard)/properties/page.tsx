@@ -490,8 +490,19 @@ export default function PropertiesPage() {
         return !prop.address || !prop.type || !prop.status
       })
       if (invalidProperties.length > 0) {
-        console.warn('Some properties missing required fields:', invalidProperties.length)
+        console.warn(`⚠️ ${invalidProperties.length} properties missing required fields and will be skipped:`, invalidProperties.map(p => ({
+          id: p.id,
+          address: p.address || '(empty)',
+          type: p.type || '(empty)',
+          status: p.status || '(empty)'
+        })))
       }
+      
+      // Log valid properties
+      const validProperties = properties.filter((prop: Property) => {
+        return prop.address && prop.type && prop.status
+      })
+      console.log(`✅ ${validProperties.length} properties have all required fields and will be saved`)
 
       const response = await fetch('/api/properties', {
         method: 'POST',
@@ -1073,12 +1084,12 @@ export default function PropertiesPage() {
           </Button>
         <Button
           onClick={() => {
-            // Add a new empty property to the list
+            // Add a new property with default values (all required fields filled)
             const newProperty: Property = {
               id: `temp-${Date.now()}`, // Temporary ID until saved
-              address: '',
-              type: '',
-              status: 'vacant',
+              address: 'New Property', // Default address so it can be saved
+              type: 'residential', // Default type so it can be saved
+              status: 'vacant', // Valid status
               purchasePrice: 0,
               currentEstValue: 0,
               monthlyMortgagePayment: 0,

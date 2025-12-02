@@ -116,18 +116,25 @@ export async function POST(request: NextRequest) {
     // Use upsert to update/insert properties without deleting others
     // This prevents data loss - properties not in the list won't be deleted
     // Only properties explicitly sent will be updated or inserted
+    console.log(`Received ${properties.length} properties to save`)
+    
     const propertiesToInsert = properties
       .map((prop: any, index: number) => {
+        // Trim and check required fields - treat empty strings as missing
+        const address = prop.address ? String(prop.address).trim() : ''
+        const type = prop.type ? String(prop.type).trim() : ''
+        const status = prop.status ? String(prop.status).trim() : ''
+        
         // Validate required fields - skip invalid ones instead of throwing
-        if (!prop.address || !prop.type || !prop.status) {
-          console.warn(`Skipping property at index ${index} - missing required fields: address="${prop.address}", type="${prop.type}", status="${prop.status}"`)
+        if (!address || !type || !status) {
+          console.warn(`Skipping property at index ${index} - missing required fields: address="${address}", type="${type}", status="${status}"`)
           return null
         }
 
         // Validate status is one of the allowed values
         const validStatuses = ['rented', 'vacant', 'under_maintenance', 'sold']
-        if (!validStatuses.includes(prop.status)) {
-          console.warn(`Skipping property at index ${index} - invalid status: "${prop.status}". Must be one of: ${validStatuses.join(', ')}`)
+        if (!validStatuses.includes(status)) {
+          console.warn(`Skipping property at index ${index} - invalid status: "${status}". Must be one of: ${validStatuses.join(', ')}`)
           return null
         }
 
@@ -135,9 +142,9 @@ export async function POST(request: NextRequest) {
       const propertyToInsert: any = {
         user_id: userId,
         workspace_id: targetWorkspaceId || null, // Allow null if workspace system isn't set up
-        address: String(prop.address).trim(),
-        type: String(prop.type).trim(),
-        status: String(prop.status).trim(),
+        address: address,
+        type: type,
+        status: status,
         mortgage_holder: prop.mortgageHolder ? String(prop.mortgageHolder).trim() : null,
         purchase_price: Number(prop.purchasePrice) || 0,
         current_est_value: Number(prop.currentEstValue) || 0,
