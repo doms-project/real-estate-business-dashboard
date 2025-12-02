@@ -116,17 +116,20 @@ export async function POST(request: NextRequest) {
     // Use upsert to update/insert properties without deleting others
     // This prevents data loss - properties not in the list won't be deleted
     // Only properties explicitly sent will be updated or inserted
-    const propertiesToInsert = properties.map((prop: any, index: number) => {
-      // Validate required fields
-      if (!prop.address || !prop.type || !prop.status) {
-        throw new Error(`Property at index ${index} missing required fields: address="${prop.address}", type="${prop.type}", status="${prop.status}"`)
-      }
+    const propertiesToInsert = properties
+      .map((prop: any, index: number) => {
+        // Validate required fields - skip invalid ones instead of throwing
+        if (!prop.address || !prop.type || !prop.status) {
+          console.warn(`Skipping property at index ${index} - missing required fields: address="${prop.address}", type="${prop.type}", status="${prop.status}"`)
+          return null
+        }
 
-      // Validate status is one of the allowed values
-      const validStatuses = ['rented', 'vacant', 'under_maintenance', 'sold']
-      if (!validStatuses.includes(prop.status)) {
-        throw new Error(`Property at index ${index} has invalid status: "${prop.status}". Must be one of: ${validStatuses.join(', ')}`)
-      }
+        // Validate status is one of the allowed values
+        const validStatuses = ['rented', 'vacant', 'under_maintenance', 'sold']
+        if (!validStatuses.includes(prop.status)) {
+          console.warn(`Skipping property at index ${index} - invalid status: "${prop.status}". Must be one of: ${validStatuses.join(', ')}`)
+          return null
+        }
 
       // Build the property object, excluding fields that don't belong in the properties table
       const propertyToInsert: any = {
