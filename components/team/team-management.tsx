@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { UserPlus, X, Mail, Crown, Shield, User } from "lucide-react"
+import { UserPlus, X, Mail, Crown, Shield, User, Copy, Check } from "lucide-react"
 
 interface WorkspaceMember {
   id: string
@@ -41,6 +41,7 @@ export function TeamManagement({ workspaceId }: TeamManagementProps) {
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
   const [inviting, setInviting] = useState(false)
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null)
   const { toast, toasts } = useToast()
 
   const fetchMembers = async () => {
@@ -113,9 +114,13 @@ export function TeamManagement({ workspaceId }: TeamManagementProps) {
         throw new Error(data.error || 'Failed to send invitation')
       }
 
+      const inviteLink = data.invitation?.inviteLink
+      
       toast({
         title: "Invitation Sent",
-        description: `Invitation sent to ${inviteEmail}`,
+        description: inviteLink 
+          ? `Invitation sent to ${inviteEmail}. Share the link: ${inviteLink}`
+          : `Invitation sent to ${inviteEmail}. They'll be prompted to join when they sign up.`,
       })
 
       setInviteEmail("")
@@ -163,6 +168,26 @@ export function TeamManagement({ workspaceId }: TeamManagementProps) {
       toast({
         title: "Error",
         description: error.message || "Failed to remove member",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleCopyInviteLink = async (invitation: Invitation) => {
+    const inviteLink = `${window.location.origin}/invite/${invitation.token}`
+    try {
+      await navigator.clipboard.writeText(inviteLink)
+      setCopiedInviteId(invitation.id)
+      toast({
+        title: "Link Copied",
+        description: "Invitation link copied to clipboard",
+      })
+      setTimeout(() => setCopiedInviteId(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy link:', error)
+      toast({
+        title: "Error",
+        description: "Failed to copy link",
         variant: "destructive",
       })
     }
@@ -360,12 +385,25 @@ export function TeamManagement({ workspaceId }: TeamManagementProps) {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                       {getRoleBadge(invitation.role)}
                       <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => handleCopyInviteLink(invitation)}
+                        title="Copy invitation link"
+                      >
+                        {copiedInviteId === invitation.id ? (
+                          <Check className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => handleCancelInvitation(invitation.id)}
+                        title="Cancel invitation"
                       >
                         <X className="h-4 w-4" />
                       </Button>

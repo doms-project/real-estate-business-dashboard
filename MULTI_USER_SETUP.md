@@ -128,3 +128,4 @@ Currently, invitations are created but acceptance needs to be implemented. The i
 - Invitation tokens are cryptographically secure (32-byte random hex)
 - Invitations expire after 7 days by default
 
+
