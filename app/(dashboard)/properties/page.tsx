@@ -509,6 +509,9 @@ export default function PropertiesPage() {
         console.log('Properties saved successfully:', data)
         
         // Reload properties from database to ensure state is in sync
+        // Add a small delay to ensure database has processed the save
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
         try {
           const reloadResponse = await fetch('/api/properties')
           if (reloadResponse.ok) {
