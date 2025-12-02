@@ -150,18 +150,25 @@ export default function PropertiesPage() {
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [properties, setProperties] = useState<Property[]>(mockProperties)
+  const [properties, setProperties] = useState<Property[]>([])
+  const [loading, setLoading] = useState(true)
 
   // Load properties from database on mount
   useEffect(() => {
     async function loadProperties() {
-      if (!user) return
+      if (!user) {
+        setLoading(false)
+        return
+      }
 
       try {
         const response = await fetch('/api/properties')
         if (response.ok) {
           const data = await response.json()
-          if (data.properties && data.properties.length > 0) {
+          console.log('Loaded properties from database:', data.properties?.length || 0)
+          
+          // Always set properties, even if empty (to clear mock data)
+          if (data.properties && Array.isArray(data.properties)) {
             const loadedProperties: Property[] = data.properties.map((p: any) => ({
               id: p.id,
               address: p.address,
@@ -181,10 +188,22 @@ export default function PropertiesPage() {
               workRequests: [], // TODO: Load from work_requests table
             }))
             setProperties(loadedProperties)
+          } else {
+            // No properties in database, set empty array
+            setProperties([])
           }
+        } else {
+          const errorData = await response.json().catch(() => ({}))
+          console.error('Failed to load properties:', errorData)
+          // Keep empty array on error
+          setProperties([])
         }
       } catch (error) {
         console.error('Failed to load properties:', error)
+        // Keep empty array on error
+        setProperties([])
+      } finally {
+        setLoading(false)
       }
     }
 
@@ -465,7 +484,9 @@ export default function PropertiesPage() {
           const reloadResponse = await fetch('/api/properties')
           if (reloadResponse.ok) {
             const reloadData = await reloadResponse.json()
-            if (reloadData.properties && reloadData.properties.length > 0) {
+            console.log('Reloaded properties after save:', reloadData.properties?.length || 0)
+            
+            if (reloadData.properties && Array.isArray(reloadData.properties)) {
               const reloadedProperties: Property[] = reloadData.properties.map((p: any) => ({
                 id: p.id,
                 address: p.address,
@@ -486,9 +507,13 @@ export default function PropertiesPage() {
               }))
               setProperties(reloadedProperties)
             } else {
-              // If no properties returned, keep current state (might be empty)
-              console.warn('No properties returned after reload')
+              // If no properties returned, set empty array
+              console.warn('No properties returned after reload, setting empty array')
+              setProperties([])
             }
+          } else {
+            const errorData = await reloadResponse.json().catch(() => ({}))
+            console.error('Failed to reload properties after save:', errorData)
           }
         } catch (reloadError) {
           console.error('Failed to reload properties after save:', reloadError)
@@ -965,6 +990,17 @@ export default function PropertiesPage() {
     { value: "monthlyOtherCosts", label: "Monthly Other Costs" },
     { value: "monthlyGrossRent", label: "Monthly Gross Rent" },
   ]
+
+  if (loading) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8 flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <div className="text-muted-foreground">Loading properties...</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 lg:space-y-8">

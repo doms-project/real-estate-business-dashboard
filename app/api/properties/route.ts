@@ -216,18 +216,20 @@ export async function POST(request: NextRequest) {
       .select()
 
     if (insertError) {
-      console.error('Error inserting properties:', insertError)
-      console.error('Properties attempted:', JSON.stringify(propertiesToInsert, null, 2))
+      console.error('Error upserting properties:', insertError)
+      console.error('Properties attempted:', JSON.stringify(propertiesToInsert.slice(0, 2), null, 2)) // Log first 2 only
       return NextResponse.json(
         { error: 'Failed to save properties', details: insertError.message },
         { status: 500 }
       )
     }
 
+    console.log(`Successfully saved ${data?.length || 0} properties`)
+
     return NextResponse.json({ 
       success: true, 
-      properties: data,
-      message: `Saved ${data.length} properties` 
+      properties: data || [],
+      message: `Saved ${data?.length || 0} properties` 
     })
   } catch (error: any) {
     console.error('Error in POST /api/properties:', error)
