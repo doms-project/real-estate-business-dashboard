@@ -401,6 +401,7 @@ export default function PropertyDetailsPage() {
                   <Label htmlFor="mortgageHolder">Mortgage Holder</Label>
                   <Input
                     id="mortgageHolder"
+                    name="mortgageHolder"
                     value={propertyData.mortgageHolder || ""}
                     onChange={(e) =>
                       handlePropertyFieldChange("mortgageHolder", e.target.value)
@@ -413,6 +414,7 @@ export default function PropertyDetailsPage() {
                   <Label htmlFor="purchasePrice">Purchase Price</Label>
                   <Input
                     id="purchasePrice"
+                    name="purchasePrice"
                     type="number"
                     value={propertyData.purchasePrice}
                     onChange={(e) =>
@@ -428,6 +430,7 @@ export default function PropertyDetailsPage() {
                   <Label htmlFor="currentEstValue">Current Est. Value</Label>
                   <Input
                     id="currentEstValue"
+                    name="currentEstValue"
                     type="number"
                     value={propertyData.currentEstValue}
                     onChange={(e) =>
@@ -445,6 +448,7 @@ export default function PropertyDetailsPage() {
                   </Label>
                   <Input
                     id="monthlyMortgagePayment"
+                    name="monthlyMortgagePayment"
                     type="number"
                     value={propertyData.monthlyMortgagePayment}
                     onChange={(e) =>
@@ -460,6 +464,7 @@ export default function PropertyDetailsPage() {
                   <Label htmlFor="monthlyInsurance">Monthly Insurance</Label>
                   <Input
                     id="monthlyInsurance"
+                    name="monthlyInsurance"
                     type="number"
                     value={propertyData.monthlyInsurance}
                     onChange={(e) =>
@@ -477,6 +482,7 @@ export default function PropertyDetailsPage() {
                   </Label>
                   <Input
                     id="monthlyPropertyTax"
+                    name="monthlyPropertyTax"
                     type="number"
                     value={propertyData.monthlyPropertyTax}
                     onChange={(e) =>
@@ -492,6 +498,7 @@ export default function PropertyDetailsPage() {
                   <Label htmlFor="monthlyOtherCosts">Monthly Other Costs</Label>
                   <Input
                     id="monthlyOtherCosts"
+                    name="monthlyOtherCosts"
                     type="number"
                     value={propertyData.monthlyOtherCosts}
                     onChange={(e) =>
@@ -507,6 +514,7 @@ export default function PropertyDetailsPage() {
                   <Label htmlFor="monthlyGrossRent">Monthly Gross Rent</Label>
                   <Input
                     id="monthlyGrossRent"
+                    name="monthlyGrossRent"
                     type="number"
                     value={propertyData.monthlyGrossRent}
                     onChange={(e) =>
@@ -529,7 +537,7 @@ export default function PropertyDetailsPage() {
                       )
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="status" name="status">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -541,6 +549,7 @@ export default function PropertyDetailsPage() {
                       <SelectItem value="sold">Sold</SelectItem>
                     </SelectContent>
                   </Select>
+                  <input type="hidden" name="status" value={propertyData.status} />
                 </div>
               </CardContent>
             </Card>
@@ -683,6 +692,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="unitName">Unit Name</Label>
                       <Input
                         id="unitName"
+                        name="unitName"
                         value={newUnit.unitName || ""}
                         onChange={(e) =>
                           setNewUnit({ ...newUnit, unitName: e.target.value })
@@ -694,6 +704,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="tenantName">Tenant Name</Label>
                       <Input
                         id="tenantName"
+                        name="tenantName"
                         value={newUnit.tenantName || ""}
                         onChange={(e) =>
                           setNewUnit({ ...newUnit, tenantName: e.target.value })
@@ -705,6 +716,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="monthlyRent">Monthly Rent</Label>
                       <Input
                         id="monthlyRent"
+                        name="monthlyRent"
                         type="number"
                         value={newUnit.monthlyRent || ""}
                         onChange={(e) =>
@@ -720,6 +732,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="securityDeposit">Security Deposit</Label>
                       <Input
                         id="securityDeposit"
+                        name="securityDeposit"
                         type="number"
                         value={newUnit.securityDeposit || ""}
                         onChange={(e) =>
@@ -735,6 +748,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="leaseStart">Lease Start</Label>
                       <Input
                         id="leaseStart"
+                        name="leaseStart"
                         type="date"
                         value={newUnit.leaseStart || ""}
                         onChange={(e) =>
@@ -746,6 +760,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="leaseEnd">Lease End</Label>
                       <Input
                         id="leaseEnd"
+                        name="leaseEnd"
                         type="date"
                         value={newUnit.leaseEnd || ""}
                         onChange={(e) =>
@@ -814,7 +829,7 @@ export default function PropertyDetailsPage() {
                                 )
                               }
                             >
-                              <SelectTrigger className="w-32">
+                              <SelectTrigger className="w-32" id={`workRequest-status-${request.id}`} name={`workRequest-status-${request.id}`}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -825,6 +840,7 @@ export default function PropertyDetailsPage() {
                                 <SelectItem value="completed">Completed</SelectItem>
                               </SelectContent>
                             </Select>
+                            <input type="hidden" name={`workRequest-status-${request.id}`} value={request.status} />
                             <Button
                               variant="ghost"
                               size="sm"
@@ -861,6 +877,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="dateLogged">Date Logged</Label>
                       <Input
                         id="dateLogged"
+                        name="dateLogged"
                         type="date"
                         value={newWorkRequest.dateLogged || ""}
                         onChange={(e) =>
@@ -882,7 +899,7 @@ export default function PropertyDetailsPage() {
                           })
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger id="workRequestStatus" name="workRequestStatus">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -891,11 +908,13 @@ export default function PropertyDetailsPage() {
                           <SelectItem value="completed">Completed</SelectItem>
                         </SelectContent>
                       </Select>
+                      <input type="hidden" name="workRequestStatus" value={newWorkRequest.status || "new"} />
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <Label htmlFor="description">Description</Label>
                       <Input
                         id="description"
+                        name="description"
                         value={newWorkRequest.description || ""}
                         onChange={(e) =>
                           setNewWorkRequest({
@@ -910,6 +929,7 @@ export default function PropertyDetailsPage() {
                       <Label htmlFor="cost">Cost</Label>
                       <Input
                         id="cost"
+                        name="cost"
                         type="number"
                         value={newWorkRequest.cost || ""}
                         onChange={(e) =>

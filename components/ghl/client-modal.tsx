@@ -57,6 +57,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
               <Label htmlFor="name">Client Name *</Label>
               <Input
                 id="name"
+                name="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
@@ -66,6 +67,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
               <Label htmlFor="email">Email *</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -79,6 +81,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
               <Label htmlFor="phone">Phone</Label>
               <Input
                 id="phone"
+                name="phone"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               />
@@ -87,6 +90,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
               <Label htmlFor="company">Company</Label>
               <Input
                 id="company"
+                name="company"
                 value={formData.company}
                 onChange={(e) => setFormData({ ...formData, company: e.target.value })}
               />
@@ -100,7 +104,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
                 value={formData.subscriptionPlan}
                 onValueChange={(value) => setFormData({ ...formData, subscriptionPlan: value as SubscriptionPlan })}
               >
-                <SelectTrigger>
+                <SelectTrigger id="subscriptionPlan" name="subscriptionPlan">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -111,6 +115,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
                   <SelectItem value="custom">Custom</SelectItem>
                 </SelectContent>
               </Select>
+              <input type="hidden" name="subscriptionPlan" value={formData.subscriptionPlan} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="status">Status *</Label>
@@ -118,7 +123,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
                 value={formData.status}
                 onValueChange={(value) => setFormData({ ...formData, status: value as "active" | "inactive" | "cancelled" })}
               >
-                <SelectTrigger>
+                <SelectTrigger id="status" name="status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -127,6 +132,7 @@ export function GHLClientModal({ client, onClose, onSave }: GHLClientModalProps)
                   <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
+              <input type="hidden" name="status" value={formData.status} />
             </div>
           </div>
 

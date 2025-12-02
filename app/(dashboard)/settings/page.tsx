@@ -41,21 +41,21 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>Email Notifications</Label>
+                  <Label htmlFor="emailNotifications">Email Notifications</Label>
                   <p className="text-sm text-muted-foreground">
                     Receive email updates about your workspace
                   </p>
                 </div>
-                <Switch />
+                <Switch id="emailNotifications" name="emailNotifications" />
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>Auto-save</Label>
+                  <Label htmlFor="autoSave">Auto-save</Label>
                   <p className="text-sm text-muted-foreground">
                     Automatically save changes
                   </p>
                 </div>
-                <Switch defaultChecked />
+                <Switch id="autoSave" name="autoSave" defaultChecked />
               </div>
             </CardContent>
           </Card>
@@ -71,9 +71,9 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Theme</Label>
+                <Label htmlFor="theme">Theme</Label>
                 <Select value={theme} onValueChange={setTheme}>
-                  <SelectTrigger>
+                  <SelectTrigger id="theme" name="theme">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -83,6 +83,7 @@ export default function SettingsPage() {
                     <SelectItem value="custom">Custom</SelectItem>
                   </SelectContent>
                 </Select>
+                <input type="hidden" name="theme" value={theme} />
               </div>
             </CardContent>
           </Card>
@@ -99,17 +100,17 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>Snap to Grid</Label>
+                  <Label htmlFor="snapToGrid">Snap to Grid</Label>
                   <p className="text-sm text-muted-foreground">
                     Align blops to grid automatically
                   </p>
                 </div>
-                <Switch checked={snapToGrid} onCheckedChange={setSnapToGrid} />
+                <Switch id="snapToGrid" name="snapToGrid" checked={snapToGrid} onCheckedChange={setSnapToGrid} />
               </div>
               <div className="space-y-2">
-                <Label>Default Blop Shape</Label>
+                <Label htmlFor="defaultBlopShape">Default Blop Shape</Label>
                 <Select defaultValue="circle">
-                  <SelectTrigger>
+                  <SelectTrigger id="defaultBlopShape" name="defaultBlopShape">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -119,11 +120,12 @@ export default function SettingsPage() {
                     <SelectItem value="diamond">Diamond</SelectItem>
                   </SelectContent>
                 </Select>
+                <input type="hidden" name="defaultBlopShape" value="circle" />
               </div>
               <div className="space-y-2">
-                <Label>Board Background</Label>
+                <Label htmlFor="boardBackground">Board Background</Label>
                 <Select defaultValue="grid">
-                  <SelectTrigger>
+                  <SelectTrigger id="boardBackground" name="boardBackground">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -132,6 +134,7 @@ export default function SettingsPage() {
                     <SelectItem value="plain">Plain</SelectItem>
                   </SelectContent>
                 </Select>
+                <input type="hidden" name="boardBackground" value="grid" />
               </div>
             </CardContent>
           </Card>

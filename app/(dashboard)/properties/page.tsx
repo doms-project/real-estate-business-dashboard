@@ -28,10 +28,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle } from "lucide-react"
+import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X } from "lucide-react"
 import { Property } from "@/types"
 import { useState, useMemo, useCallback, useRef } from "react"
 import Link from "next/link"
+import {
+  PropertyField,
+  PropertyFieldMapping,
+  generateInitialMapping,
+  mapCsvRowToProperty,
+  validateMapping,
+  REQUIRED_FIELDS,
+} from "@/lib/csv-import"
 
 // Mock data with new fields
 const mockProperties: Property[] = [
@@ -75,6 +83,7 @@ const mockProperties: Property[] = [
         cost: 150,
       },
     ],
+    ownership: "100% ownership",
     },
     {
       id: "2",
@@ -100,6 +109,7 @@ const mockProperties: Property[] = [
       },
     ],
     workRequests: [],
+    ownership: "50% partner",
   },
   {
     id: "3",
@@ -124,6 +134,7 @@ const mockProperties: Property[] = [
         cost: 800,
       },
     ],
+    ownership: "100% ownership",
   },
 ]
 
@@ -138,9 +149,11 @@ export default function PropertiesPage() {
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvData, setCsvData] = useState<string[][]>([])
   const [csvHeaders, setCsvHeaders] = useState<string[]>([])
-  const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({})
+  const [fieldMapping, setFieldMapping] = useState<PropertyFieldMapping>({})
   const [importError, setImportError] = useState<string>("")
   const [importSuccess, setImportSuccess] = useState<string>("")
+  const [editingCell, setEditingCell] = useState<{ propertyId: string; field: string } | null>(null)
+  const [editValue, setEditValue] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Calculate monthly total costs
@@ -287,6 +300,202 @@ export default function PropertiesPage() {
     return `${value.toFixed(2)}%`
   }
 
+  // Handle delete property
+  const handleDeleteProperty = (propertyId: string) => {
+    if (confirm("Are you sure you want to delete this property? This action cannot be undone.")) {
+      setProperties(properties.filter((p) => p.id !== propertyId))
+    }
+  }
+
+  // Handle inline editing
+  const handleCellClick = (propertyId: string, field: string, currentValue: any, rawValue?: any) => {
+    // Don't allow editing calculated fields
+    if (field === "monthlyCosts" || field === "monthlyCashflow" || field === "roe") {
+      return
+    }
+    
+    setEditingCell({ propertyId, field })
+    // Use rawValue if provided (for formatted currency/percentage), otherwise use currentValue
+    const valueToEdit = rawValue !== undefined ? rawValue : currentValue
+    if (typeof valueToEdit === "number") {
+      setEditValue(valueToEdit.toString())
+    } else {
+      setEditValue(String(valueToEdit || ""))
+    }
+  }
+
+  const handleCellSave = () => {
+    if (!editingCell) return
+
+    const { propertyId, field } = editingCell
+    const property = properties.find((p) => p.id === propertyId)
+    if (!property) return
+
+    const updatedProperties = properties.map((p) => {
+      if (p.id === propertyId) {
+        const updated = { ...p }
+        
+        // Handle different field types
+        if (field === "status") {
+          if (["rented", "vacant", "under_maintenance", "sold"].includes(editValue.toLowerCase())) {
+            updated.status = editValue.toLowerCase() as Property["status"]
+          }
+        } else if (
+          [
+            "purchasePrice",
+            "currentEstValue",
+            "monthlyMortgagePayment",
+            "monthlyInsurance",
+            "monthlyPropertyTax",
+            "monthlyOtherCosts",
+            "monthlyGrossRent",
+          ].includes(field)
+        ) {
+          const numValue = parseFloat(editValue.replace(/[$,\s]/g, ""))
+          if (!isNaN(numValue)) {
+            ;(updated as any)[field] = numValue
+          }
+        } else if (field === "address" || field === "type" || field === "mortgageHolder") {
+          ;(updated as any)[field] = editValue
+        } else if (field === "ownership") {
+          const validOwnership = [
+            "100% ownership",
+            "50% partner",
+            "25% partner",
+            "75% partner",
+            "33% partner",
+            "67% partner",
+          ].includes(editValue)
+            ? editValue
+            : "100% ownership"
+          ;(updated as any)[field] = validOwnership
+        }
+        
+        return updated
+      }
+      return p
+    })
+
+    setProperties(updatedProperties)
+    setEditingCell(null)
+    setEditValue("")
+  }
+
+  const handleCellCancel = () => {
+    setEditingCell(null)
+    setEditValue("")
+  }
+
+  // Render editable cell
+  const renderEditableCell = (
+    propertyId: string,
+    field: string,
+    displayValue: any,
+    rawValue: any,
+    isEditable: boolean = true,
+    className: string = ""
+  ) => {
+    const isEditing = editingCell?.propertyId === propertyId && editingCell?.field === field
+
+    if (!isEditable) {
+      // Read-only cell (calculated values)
+      return <span className={className}>{displayValue}</span>
+    }
+
+    if (isEditing) {
+      if (field === "status") {
+        return (
+          <div className="flex items-center gap-1">
+            <Select
+              value={editValue}
+              onValueChange={setEditValue}
+              onOpenChange={(open) => {
+                if (!open) {
+                  // When select closes, save
+                  handleCellSave()
+                }
+              }}
+            >
+              <SelectTrigger className="h-8 w-32" id={`edit-${propertyId}-${field}`} name={`edit-${propertyId}-${field}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="rented">Rented</SelectItem>
+                <SelectItem value="vacant">Vacant</SelectItem>
+                <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
+                <SelectItem value="sold">Sold</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCellSave}
+              className="h-8 w-8 p-0"
+            >
+              <Check className="h-4 w-4 text-green-600" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCellCancel}
+              className="h-8 w-8 p-0"
+            >
+              <X className="h-4 w-4 text-red-600" />
+            </Button>
+          </div>
+        )
+      }
+
+      return (
+        <div className="flex items-center gap-1">
+          <Input
+            id={`edit-${propertyId}-${field}`}
+            name={`edit-${propertyId}-${field}`}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleCellSave}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                handleCellSave()
+              } else if (e.key === "Escape") {
+                handleCellCancel()
+              }
+            }}
+            className="h-8 w-32"
+            autoFocus
+            type={typeof rawValue === "number" ? "number" : "text"}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCellSave}
+            className="h-8 w-8 p-0"
+          >
+            <Check className="h-4 w-4 text-green-600" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCellCancel}
+            className="h-8 w-8 p-0"
+          >
+            <X className="h-4 w-4 text-red-600" />
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <span
+        className={`cursor-pointer hover:bg-muted/50 rounded px-1 transition-colors ${className}`}
+        onClick={() => handleCellClick(propertyId, field, displayValue, rawValue)}
+        title="Click to edit"
+      >
+        {displayValue}
+      </span>
+    )
+  }
+
   // Export functions
   const exportToCSV = () => {
     const headers = [
@@ -427,6 +636,9 @@ export default function PropertiesPage() {
 
   const parseCSV = (text: string) => {
     try {
+      setImportError("")
+      setImportSuccess("")
+
       // Handle different line endings (Windows \r\n, Mac \r, Unix \n)
       const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
       const lines = normalizedText.split("\n").filter((line) => line.trim().length > 0)
@@ -441,6 +653,7 @@ export default function PropertiesPage() {
         return
       }
 
+      // Parse CSV rows with proper quote handling
       const parsed = lines.map((line) => {
         const result: string[] = []
         let current = ""
@@ -469,15 +682,34 @@ export default function PropertiesPage() {
         return result
       })
 
-      const headers = parsed[0].map((h) => h.replace(/^["']|["']$/g, "").trim())
-      const data = parsed.slice(1).filter((row) => row.some((cell) => cell.trim().length > 0))
+      // Extract headers and clean them
+      const headers = parsed[0]
+        .map((h) => h.replace(/^["']|["']$/g, "").trim())
+        .filter((h) => h.length > 0) // Filter out empty headers
 
       if (headers.length === 0) {
-        setImportError("No headers found in CSV file")
+        setImportError("No valid headers found in CSV file")
         return
       }
 
-      // Check if all rows have the same number of columns
+      // Extract data rows, padding with empty strings if needed
+      const data = parsed.slice(1)
+        .map((row) => {
+          // Pad row to match header length
+          const padded = [...row]
+          while (padded.length < headers.length) {
+            padded.push("")
+          }
+          return padded.slice(0, headers.length)
+        })
+        .filter((row) => row.some((cell) => cell && cell.trim().length > 0)) // Filter completely empty rows
+
+      if (data.length === 0) {
+        setImportError("No data rows found in CSV file")
+        return
+      }
+
+      // Check for column count mismatches (warning only)
       const expectedColumns = headers.length
       const invalidRows = data.filter((row) => row.length !== expectedColumns)
       if (invalidRows.length > 0) {
@@ -487,51 +719,14 @@ export default function PropertiesPage() {
       setCsvHeaders(headers)
       setCsvData(data)
       
-      // Auto-map fields based on header names
-      const autoMapping: Record<string, string> = {}
-      const propertyFields = [
-        "address",
-        "type",
-        "status",
-        "mortgageHolder",
-        "purchasePrice",
-        "currentEstValue",
-        "monthlyMortgagePayment",
-        "monthlyInsurance",
-        "monthlyPropertyTax",
-        "monthlyOtherCosts",
-        "monthlyGrossRent",
-      ]
-
-      headers.forEach((header) => {
-        const normalizedHeader = header.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9]/g, "")
-        const matchedField = propertyFields.find((field) => {
-          const normalizedField = field.replace(/([A-Z])/g, " $1").toLowerCase().trim().replace(/\s+/g, "")
-          const fieldVariations = [
-            normalizedField,
-            field.toLowerCase(),
-            field.replace(/([A-Z])/g, " $1").toLowerCase().trim(),
-          ]
-          
-          return (
-            normalizedHeader === normalizedField ||
-            normalizedHeader.includes(normalizedField) ||
-            normalizedField.includes(normalizedHeader) ||
-            fieldVariations.some(v => normalizedHeader.includes(v) || v.includes(normalizedHeader)) ||
-            header.toLowerCase().includes(field.toLowerCase()) ||
-            field.toLowerCase().includes(header.toLowerCase())
-          )
-        })
-        if (matchedField) {
-          autoMapping[header] = matchedField
-        }
-      })
-
-      setFieldMapping(autoMapping)
+      // Generate initial mapping using utility function
+      const initialMapping = generateInitialMapping(headers)
+      setFieldMapping(initialMapping)
+      
       setImportDialogOpen(true)
-      setImportError("")
     } catch (error) {
       setImportError(`Error parsing CSV: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error("CSV parsing error:", error)
     }
   }
 
@@ -540,89 +735,68 @@ export default function PropertiesPage() {
       setImportError("")
       setImportSuccess("")
 
-      // Validate that at least address is mapped
-      const addressMapped = Object.values(fieldMapping).includes("address")
-      if (!addressMapped) {
-        setImportError("Please map at least the 'Address' field to import properties")
+      // Validate required fields are mapped
+      const validation = validateMapping(fieldMapping)
+      if (!validation.valid) {
+        const missingFields = validation.missingFields
+          .map((field) => {
+            // Convert camelCase to readable format
+            return field.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase())
+          })
+          .join(", ")
+        setImportError(`Your CSV is missing mappings for: ${missingFields}. Please select a column for each required field.`)
+        return
+      }
+
+      // Validate CSV data structure
+      if (!Array.isArray(csvData) || csvData.length === 0) {
+        setImportError("No data rows found to import")
+        return
+      }
+
+      if (!Array.isArray(csvHeaders) || csvHeaders.length === 0) {
+        setImportError("No headers found in CSV")
         return
       }
 
       const importedProperties: Property[] = []
       const errors: string[] = []
 
+      // Process each row safely
       csvData.forEach((row, index) => {
-        const property: Partial<Property> = {
-          id: `imported-${Date.now()}-${index}`,
-          address: "",
-          type: "",
-          status: "vacant",
-          purchasePrice: 0,
-          currentEstValue: 0,
-          monthlyMortgagePayment: 0,
-          monthlyInsurance: 0,
-          monthlyPropertyTax: 0,
-          monthlyOtherCosts: 0,
-          monthlyGrossRent: 0,
-          rentRoll: [],
-          workRequests: [],
-        }
+        try {
+          // Use utility function to safely map row to property
+          const propertyPartial = mapCsvRowToProperty(row, csvHeaders, fieldMapping)
 
-        csvHeaders.forEach((header, colIndex) => {
-          const mappedField = fieldMapping[header]
-          if (mappedField && mappedField !== "" && row[colIndex] !== undefined) {
-            let value = row[colIndex]?.replace(/^["']|["']$/g, "").trim() || ""
-            
-            if (!value) return // Skip empty values
-            
-            if (mappedField === "status") {
-              const statusValue = value.toLowerCase().trim()
-              // More flexible status matching
-              const statusMap: Record<string, Property["status"]> = {
-                "rented": "rented",
-                "rent": "rented",
-                "occupied": "rented",
-                "vacant": "vacant",
-                "vacancy": "vacant",
-                "empty": "vacant",
-                "under_maintenance": "under_maintenance",
-                "maintenance": "under_maintenance",
-                "repair": "under_maintenance",
-                "sold": "sold",
-                "sale": "sold",
-              }
-              property[mappedField] = statusMap[statusValue] || "vacant"
-            } else if (
-              [
-                "purchasePrice",
-                "currentEstValue",
-                "monthlyMortgagePayment",
-                "monthlyInsurance",
-                "monthlyPropertyTax",
-                "monthlyOtherCosts",
-                "monthlyGrossRent",
-              ].includes(mappedField)
-            ) {
-              // Remove currency symbols, commas, and whitespace
-              const cleanedValue = value.replace(/[$,\s]/g, "")
-              const numValue = parseFloat(cleanedValue)
-              if (!isNaN(numValue) && isFinite(numValue)) {
-                property[mappedField as keyof Property] = numValue as any
-              } else {
-                errors.push(`Row ${index + 1}: Invalid number for ${mappedField}: "${value}"`)
-              }
-            } else {
-              property[mappedField as keyof Property] = value as any
-            }
+          // Validate required fields
+          if (!propertyPartial.address || propertyPartial.address.trim() === "") {
+            errors.push(`Row ${index + 2}: Missing required field 'address'`)
+            return
           }
-        })
 
-        // Validate required fields
-        if (!property.address || property.address.trim() === "") {
-          errors.push(`Row ${index + 1}: Missing required field 'address'`)
-          return
+          // Create complete property with ID
+          const property: Property = {
+            id: `imported-${Date.now()}-${index}`,
+            address: propertyPartial.address || "",
+            type: propertyPartial.type || "",
+            status: propertyPartial.status || "vacant",
+            mortgageHolder: propertyPartial.mortgageHolder,
+            purchasePrice: propertyPartial.purchasePrice || 0,
+            currentEstValue: propertyPartial.currentEstValue || 0,
+            monthlyMortgagePayment: propertyPartial.monthlyMortgagePayment || 0,
+            monthlyInsurance: propertyPartial.monthlyInsurance || 0,
+            monthlyPropertyTax: propertyPartial.monthlyPropertyTax || 0,
+            monthlyOtherCosts: propertyPartial.monthlyOtherCosts || 0,
+            monthlyGrossRent: propertyPartial.monthlyGrossRent || 0,
+            rentRoll: propertyPartial.rentRoll || [],
+            workRequests: propertyPartial.workRequests || [],
+            linkedWebsites: propertyPartial.linkedWebsites,
+          }
+
+          importedProperties.push(property)
+        } catch (rowError) {
+          errors.push(`Row ${index + 2}: ${rowError instanceof Error ? rowError.message : 'Unknown error'}`)
         }
-
-        importedProperties.push(property as Property)
       })
 
       if (errors.length > 0 && importedProperties.length === 0) {
@@ -652,11 +826,12 @@ export default function PropertiesPage() {
       }, 2000)
     } catch (error) {
       setImportError(`Import error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error("Import error:", error)
     }
   }
 
-  const propertyFields = [
-    { value: "", label: "Skip this column" },
+  // Property field options for mapping (no empty string values)
+  const propertyFields: { value: PropertyField; label: string }[] = [
     { value: "address", label: "Address" },
     { value: "type", label: "Type" },
     { value: "status", label: "Status" },
@@ -688,6 +863,8 @@ export default function PropertiesPage() {
           </Button>
           <input
             ref={fileInputRef}
+            id="csvFileInput"
+            name="csvFileInput"
             type="file"
             accept=".csv,.txt"
             onChange={handleFileUpload}
@@ -712,6 +889,8 @@ export default function PropertiesPage() {
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">Filter by status:</span>
         <select
+          id="statusFilter"
+          name="statusFilter"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="px-3 py-1 border rounded-md text-sm"
@@ -747,6 +926,7 @@ export default function PropertiesPage() {
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
+              <TableHead>Partners</TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 text-right"
                 onClick={() => handleSort("currentEstValue")}
@@ -794,6 +974,7 @@ export default function PropertiesPage() {
                 </div>
               </TableHead>
               <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="w-12"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -824,25 +1005,115 @@ export default function PropertiesPage() {
                           <Star className="h-4 w-4 text-green-500 fill-green-500" />
                         </span>
                       )}
-                      {property.address}
+                      {renderEditableCell(
+                        property.id,
+                        "address",
+                        property.address,
+                        property.address,
+                        true,
+                        "font-medium"
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={getStatusBadgeVariant(property.status)}>
-                      {property.status.replace("_", " ")}
-                    </Badge>
+                    {editingCell?.propertyId === property.id && editingCell?.field === "status" ? (
+                      renderEditableCell(property.id, "status", property.status, property.status, true)
+                    ) : (
+                      <Badge
+                        variant={getStatusBadgeVariant(property.status)}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => handleCellClick(property.id, "status", property.status, property.status)}
+                      >
+                        {property.status.replace("_", " ")}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {editingCell?.propertyId === property.id && editingCell?.field === "ownership" ? (
+                      <div className="flex items-center gap-1">
+                        <Select
+                          value={editValue || "100% ownership"}
+                          onValueChange={setEditValue}
+                          onOpenChange={(open) => {
+                            if (!open) {
+                              handleCellSave()
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-40" id={`edit-${property.id}-ownership`} name={`edit-${property.id}-ownership`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="100% ownership">100% ownership</SelectItem>
+                            <SelectItem value="50% partner">50% partner</SelectItem>
+                            <SelectItem value="25% partner">25% partner</SelectItem>
+                            <SelectItem value="75% partner">75% partner</SelectItem>
+                            <SelectItem value="33% partner">33% partner</SelectItem>
+                            <SelectItem value="67% partner">67% partner</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCellSave}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Check className="h-4 w-4 text-green-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCellCancel}
+                          className="h-8 w-8 p-0"
+                        >
+                          <X className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <span
+                        className="cursor-pointer hover:bg-muted/50 rounded px-1 transition-colors"
+                        onClick={() => handleCellClick(property.id, "ownership", property.ownership || "100% ownership", property.ownership || "100% ownership")}
+                        title="Click to edit"
+                      >
+                        {property.ownership || "100% ownership"}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(property.currentEstValue)}
+                    {renderEditableCell(
+                      property.id,
+                      "currentEstValue",
+                      formatCurrency(property.currentEstValue),
+                      property.currentEstValue,
+                      true
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(property.purchasePrice)}
+                    {renderEditableCell(
+                      property.id,
+                      "purchasePrice",
+                      formatCurrency(property.purchasePrice),
+                      property.purchasePrice,
+                      true
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(property.monthlyGrossRent)}
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyGrossRent",
+                      formatCurrency(property.monthlyGrossRent),
+                      property.monthlyGrossRent,
+                      true
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(monthlyCosts)}
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyCosts",
+                      formatCurrency(monthlyCosts),
+                      monthlyCosts,
+                      false
+                    )}
                   </TableCell>
                   <TableCell
                     className={`text-right font-semibold ${
@@ -851,10 +1122,16 @@ export default function PropertiesPage() {
                         : "text-red-600 dark:text-red-400"
                     }`}
                   >
-                    {formatCurrency(monthlyCashflow)}
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyCashflow",
+                      formatCurrency(monthlyCashflow),
+                      monthlyCashflow,
+                      false
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatPercentage(roe)}
+                    {renderEditableCell(property.id, "roe", formatPercentage(roe), roe, false)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Link href={`/properties/${property.id}/details`}>
@@ -864,13 +1141,23 @@ export default function PropertiesPage() {
                       </Button>
                     </Link>
                   </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeleteProperty(property.id)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
               )
             })}
           </TableBody>
           <TableFooter>
             <TableRow className="font-bold bg-muted/50">
-              <TableCell colSpan={2}>Portfolio Totals</TableCell>
+              <TableCell colSpan={3}>Portfolio Totals</TableCell>
               <TableCell className="text-right">
                 {portfolioTotals.totalProperties} Properties
               </TableCell>
@@ -888,6 +1175,7 @@ export default function PropertiesPage() {
               >
                 {formatCurrency(portfolioTotals.totalMonthlyCashflow)}
               </TableCell>
+              <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
             </TableRow>
@@ -939,38 +1227,88 @@ export default function PropertiesPage() {
                     No headers detected. Please check your CSV file format.
                   </p>
                 ) : (
-                  csvHeaders.map((header, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <div className="flex-1 text-sm font-medium truncate" title={header}>
-                        {header}
-                      </div>
-                      <div className="text-sm text-muted-foreground">→</div>
-                      <Select
-                        value={fieldMapping[header] || ""}
-                        onValueChange={(value) =>
-                          setFieldMapping({ ...fieldMapping, [header]: value })
-                        }
-                      >
-                        <SelectTrigger className="w-64">
-                          <SelectValue placeholder="Select field..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {propertyFields.map((field) => (
-                            <SelectItem key={field.value} value={field.value}>
-                              {field.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ))
+                  csvHeaders
+                    .filter((h) => h && h.trim() !== "")
+                    .map((header, index) => {
+                      // Find which PropertyField is mapped to this header
+                      const currentMapping = Object.entries(fieldMapping).find(
+                        ([_, mappedHeader]) => mappedHeader === header
+                      )?.[0] as PropertyField | undefined
+
+                      return (
+                        <div key={`${header}-${index}`} className="flex items-center gap-2">
+                          <div className="flex-1 text-sm font-medium truncate" title={header}>
+                            {header}
+                          </div>
+                          <div className="text-sm text-muted-foreground">→</div>
+                          <Select
+                            value={currentMapping || undefined}
+                            onValueChange={(value) => {
+                              if (value === "__unmapped") {
+                                // Remove mapping - find and remove the entry
+                                const newMapping = { ...fieldMapping }
+                                Object.keys(newMapping).forEach((key) => {
+                                  if (newMapping[key as PropertyField] === header) {
+                                    delete newMapping[key as PropertyField]
+                                  }
+                                })
+                                setFieldMapping(newMapping)
+                              } else {
+                                // Set mapping - remove old mapping first if exists
+                                const newMapping = { ...fieldMapping }
+                                Object.keys(newMapping).forEach((key) => {
+                                  if (newMapping[key as PropertyField] === header) {
+                                    delete newMapping[key as PropertyField]
+                                  }
+                                })
+                                // Add new mapping
+                                newMapping[value as PropertyField] = header
+                                setFieldMapping(newMapping)
+                              }
+                            }}
+                          >
+                            <SelectTrigger
+                              className="w-64"
+                              id={`csv-mapping-${header}`}
+                              name={`csv-mapping-${header}`}
+                            >
+                              <SelectValue placeholder="Select field..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {propertyFields.map((field) => (
+                                <SelectItem key={field.value} value={field.value}>
+                                  {field.label}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="__unmapped">Unmapped / Ignore</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <input
+                            type="hidden"
+                            name={`csv-mapping-${header}`}
+                            value={currentMapping || ""}
+                          />
+                        </div>
+                      )
+                    })
                 )}
               </div>
-              {!Object.values(fieldMapping).includes("address") && csvHeaders.length > 0 && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ Please map at least the &quot;Address&quot; field to import properties
-                </p>
-              )}
+              {(() => {
+                const validation = validateMapping(fieldMapping)
+                if (!validation.valid && csvHeaders.length > 0) {
+                  const missingFields = validation.missingFields
+                    .map((field) => {
+                      return field.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase())
+                    })
+                    .join(", ")
+                  return (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      ⚠️ Please map the following required fields: {missingFields}
+                    </p>
+                  )
+                }
+                return null
+              })()}
             </div>
 
             {/* Preview */}
@@ -991,9 +1329,13 @@ export default function PropertiesPage() {
                     <TableBody>
                       {csvData.slice(0, 3).map((row, rowIndex) => (
                         <TableRow key={rowIndex}>
-                          {row.map((cell, cellIndex) => (
-                            <TableCell key={cellIndex} className="text-xs">
-                              {cell.replace(/^"|"$/g, "").substring(0, 30)}
+                          {csvHeaders.map((header, cellIndex) => (
+                            <TableCell key={`${header}-${cellIndex}`} className="text-xs">
+                              {row[cellIndex]
+                                ? String(row[cellIndex])
+                                    .replace(/^["']|["']$/g, "")
+                                    .substring(0, 30)
+                                : ""}
                             </TableCell>
                           ))}
                         </TableRow>
@@ -1008,7 +1350,10 @@ export default function PropertiesPage() {
             <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleImport} disabled={csvData.length === 0}>
+            <Button
+              onClick={handleImport}
+              disabled={csvData.length === 0 || !validateMapping(fieldMapping).valid}
+            >
               Import {csvData.length} Properties
             </Button>
           </DialogFooter>

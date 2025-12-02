@@ -163,6 +163,8 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
       <form onSubmit={handleSubmit} className="p-4 border-t">
         <div className="flex gap-2">
           <Input
+            id="aiCoachInput"
+            name="aiCoachInput"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask me anything about your business..."
