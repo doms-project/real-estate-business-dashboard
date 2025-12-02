@@ -358,6 +358,8 @@ export default function PropertiesPage() {
       return
     }
     
+    // Allow editing all other fields including type and mortgageHolder
+    
     setEditingCell({ propertyId, field })
     // Use rawValue if provided (for formatted currency/percentage), otherwise use currentValue
     const valueToEdit = rawValue !== undefined ? rawValue : currentValue

@@ -24,15 +24,29 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get user's workspaces
-    const workspaces = await getUserWorkspaces(userId)
-    const workspaceIds = workspaces.map(w => w.id)
+    // Get user's workspaces (handle case where workspace tables don't exist yet)
+    let workspaceIds: string[] = []
+    try {
+      const workspaces = await getUserWorkspaces(userId)
+      workspaceIds = workspaces.map(w => w.id)
+    } catch (workspaceError: any) {
+      // If workspace tables don't exist, fall back to user_id filtering
+      console.warn('Could not fetch workspaces, falling back to user_id filter:', workspaceError.message)
+    }
 
-    const { data, error } = await supabaseAdmin
+    // Build query - use workspace filter if available, otherwise fall back to user_id
+    let query = supabaseAdmin
       .from('properties')
       .select('*')
-      .in('workspace_id', workspaceIds)
-      .order('created_at', { ascending: false })
+    
+    if (workspaceIds.length > 0) {
+      query = query.in('workspace_id', workspaceIds)
+    } else {
+      // Fallback: filter by user_id if workspace system isn't set up
+      query = query.eq('user_id', userId)
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false })
 
     if (error) {
       console.error('Error fetching properties:', error)
@@ -92,15 +106,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get or create workspace
-    const workspace = await getOrCreateUserWorkspace(userId)
-    const targetWorkspaceId = workspaceId || workspace.id
+    // Get or create workspace (handle case where workspace tables don't exist yet)
+    let targetWorkspaceId: string | null = workspaceId || null
+    try {
+      const workspace = await getOrCreateUserWorkspace(userId)
+      targetWorkspaceId = workspaceId || workspace.id
+    } catch (workspaceError: any) {
+      // If workspace tables don't exist, we'll use null and rely on user_id
+      console.warn('Could not get/create workspace, using user_id only:', workspaceError.message)
+      targetWorkspaceId = null
+    }
 
-    // Delete existing properties for this workspace
-    const { error: deleteError } = await supabaseAdmin
-      .from('properties')
-      .delete()
-      .eq('workspace_id', targetWorkspaceId)
+    // Delete existing properties for this workspace or user
+    let deleteQuery = supabaseAdmin.from('properties').delete()
+    if (targetWorkspaceId) {
+      deleteQuery = deleteQuery.eq('workspace_id', targetWorkspaceId)
+    } else {
+      // Fallback: delete by user_id if workspace system isn't set up
+      deleteQuery = deleteQuery.eq('user_id', userId)
+    }
+    const { error: deleteError } = await deleteQuery
 
     if (deleteError) {
       console.error('Error deleting existing properties:', deleteError)
@@ -123,7 +148,7 @@ export async function POST(request: NextRequest) {
       // Build the property object, excluding fields that don't belong in the properties table
       const propertyToInsert: any = {
         user_id: userId,
-        workspace_id: targetWorkspaceId,
+        workspace_id: targetWorkspaceId || null, // Allow null if workspace system isn't set up
         address: String(prop.address).trim(),
         type: String(prop.type).trim(),
         status: String(prop.status).trim(),
