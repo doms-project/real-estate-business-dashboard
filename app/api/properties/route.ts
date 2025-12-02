@@ -179,9 +179,12 @@ export async function POST(request: NextRequest) {
       })
       .filter((p: any) => p !== null) // Remove null entries (invalid properties)
 
+    console.log(`After validation: ${propertiesToInsert.length} valid properties out of ${properties.length} total`)
+    
     if (propertiesToInsert.length === 0) {
+      console.error('All properties were filtered out during validation')
       return NextResponse.json(
-        { error: 'No properties to save' },
+        { error: 'No valid properties to save. All properties were missing required fields (address, type, status) or had invalid status values.' },
         { status: 400 }
       )
     }
