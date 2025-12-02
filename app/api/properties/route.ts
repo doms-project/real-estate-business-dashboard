@@ -113,36 +113,9 @@ export async function POST(request: NextRequest) {
       targetWorkspaceId = null
     }
 
-    // Use upsert instead of delete-all + insert to prevent data loss
-    // First, get existing property IDs to preserve ones not being updated
-    let existingQuery = supabaseAdmin.from('properties').select('id')
-    if (targetWorkspaceId) {
-      existingQuery = existingQuery.eq('workspace_id', targetWorkspaceId)
-    } else {
-      existingQuery = existingQuery.eq('user_id', userId)
-    }
-    
-    const { data: existingProperties } = await existingQuery
-    const existingIds = new Set((existingProperties || []).map((p: any) => p.id))
-    const incomingIds = new Set(properties.map((p: any) => p.id).filter(Boolean))
-    
-    // Properties to delete (exist in DB but not in incoming list)
-    const idsToDelete = Array.from(existingIds).filter(id => !incomingIds.has(id))
-    
-    // Delete properties that are no longer in the list
-    if (idsToDelete.length > 0) {
-      const { error: deleteError } = await supabaseAdmin
-        .from('properties')
-        .delete()
-        .in('id', idsToDelete)
-      
-      if (deleteError) {
-        console.error('Error deleting removed properties:', deleteError)
-        // Continue - this is not critical
-      }
-    }
-
-    // Upsert properties (insert or update)
+    // Use upsert to update/insert properties without deleting others
+    // This prevents data loss - properties not in the list won't be deleted
+    // Only properties explicitly sent will be updated or inserted
     const propertiesToInsert = properties.map((prop: any, index: number) => {
       // Validate required fields
       if (!prop.address || !prop.type || !prop.status) {
@@ -185,8 +158,9 @@ export async function POST(request: NextRequest) {
       // - rentRoll (stored in rent_roll_units table)
       // - workRequests (stored in work_requests table)
 
-      return propertyToInsert
-    })
+        return propertyToInsert
+      })
+      .filter((p: any) => p !== null) // Remove null entries (invalid properties)
 
     if (propertiesToInsert.length === 0) {
       return NextResponse.json(

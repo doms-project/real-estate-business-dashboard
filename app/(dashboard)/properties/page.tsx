@@ -453,16 +453,18 @@ export default function PropertiesPage() {
 
   const handleSaveProperties = async () => {
     try {
-      // Filter out any properties that are missing required fields
-      const validProperties = properties.filter((prop: Property) => {
-        return prop.address && prop.type && prop.status
+      // Send ALL properties - don't filter them out
+      // The API will validate and handle invalid ones
+      // This prevents accidentally deleting properties that are filtered out
+      console.log('Saving properties:', properties.length, 'total properties in state')
+      
+      // Log any properties that might be missing required fields (for debugging)
+      const invalidProperties = properties.filter((prop: Property) => {
+        return !prop.address || !prop.type || !prop.status
       })
-
-      if (validProperties.length === 0) {
-        throw new Error('No valid properties to save. Please ensure all properties have address, type, and status.')
+      if (invalidProperties.length > 0) {
+        console.warn('Some properties missing required fields:', invalidProperties.length)
       }
-
-      console.log('Saving properties:', validProperties.length)
 
       const response = await fetch('/api/properties', {
         method: 'POST',
@@ -470,7 +472,7 @@ export default function PropertiesPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          properties: validProperties,
+          properties: properties, // Send all properties, not just "valid" ones
           workspaceId: null,
         }),
       })
