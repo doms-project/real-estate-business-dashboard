@@ -117,22 +117,36 @@ export async function POST(request: NextRequest) {
       targetWorkspaceId = null
     }
 
-    // Delete existing properties for this workspace or user
-    let deleteQuery = supabaseAdmin.from('properties').delete()
+    // Use upsert instead of delete-all + insert to prevent data loss
+    // First, get existing property IDs to preserve ones not being updated
+    let existingQuery = supabaseAdmin.from('properties').select('id')
     if (targetWorkspaceId) {
-      deleteQuery = deleteQuery.eq('workspace_id', targetWorkspaceId)
+      existingQuery = existingQuery.eq('workspace_id', targetWorkspaceId)
     } else {
-      // Fallback: delete by user_id if workspace system isn't set up
-      deleteQuery = deleteQuery.eq('user_id', userId)
+      existingQuery = existingQuery.eq('user_id', userId)
     }
-    const { error: deleteError } = await deleteQuery
-
-    if (deleteError) {
-      console.error('Error deleting existing properties:', deleteError)
-      // Continue anyway - might be first time saving
+    
+    const { data: existingProperties } = await existingQuery
+    const existingIds = new Set((existingProperties || []).map((p: any) => p.id))
+    const incomingIds = new Set(properties.map((p: any) => p.id).filter(Boolean))
+    
+    // Properties to delete (exist in DB but not in incoming list)
+    const idsToDelete = Array.from(existingIds).filter(id => !incomingIds.has(id))
+    
+    // Delete properties that are no longer in the list
+    if (idsToDelete.length > 0) {
+      const { error: deleteError } = await supabaseAdmin
+        .from('properties')
+        .delete()
+        .in('id', idsToDelete)
+      
+      if (deleteError) {
+        console.error('Error deleting removed properties:', deleteError)
+        // Continue - this is not critical
+      }
     }
 
-    // Insert new properties
+    // Upsert properties (insert or update)
     const propertiesToInsert = properties.map((prop: any, index: number) => {
       // Validate required fields
       if (!prop.address || !prop.type || !prop.status) {
@@ -163,6 +177,12 @@ export async function POST(request: NextRequest) {
         ownership: prop.ownership ? String(prop.ownership).trim() : null,
         linked_websites: Array.isArray(prop.linkedWebsites) && prop.linkedWebsites.length > 0 ? prop.linkedWebsites : null,
       }
+      
+      // Preserve ID if it exists and is a valid UUID (from database)
+      // This allows upsert to update existing properties
+      if (prop.id && typeof prop.id === 'string' && prop.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        propertyToInsert.id = prop.id
+      }
 
       // Note: We intentionally exclude:
       // - id (database generates it)
@@ -179,9 +199,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Use upsert to update existing properties or insert new ones
+    // Only include id in conflict resolution if we have IDs
+    const hasIds = propertiesToInsert.some((p: any) => p.id)
+    const upsertOptions: any = {
+      ignoreDuplicates: false,
+    }
+    
+    if (hasIds) {
+      upsertOptions.onConflict = 'id' // If id exists, update; otherwise insert
+    }
+    
     const { data, error: insertError } = await supabaseAdmin
       .from('properties')
-      .insert(propertiesToInsert)
+      .upsert(propertiesToInsert, upsertOptions)
       .select()
 
     if (insertError) {

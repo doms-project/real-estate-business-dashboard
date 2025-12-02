@@ -459,6 +459,42 @@ export default function PropertiesPage() {
       if (response.ok) {
         const data = await response.json()
         console.log('Properties saved successfully:', data)
+        
+        // Reload properties from database to ensure state is in sync
+        try {
+          const reloadResponse = await fetch('/api/properties')
+          if (reloadResponse.ok) {
+            const reloadData = await reloadResponse.json()
+            if (reloadData.properties && reloadData.properties.length > 0) {
+              const reloadedProperties: Property[] = reloadData.properties.map((p: any) => ({
+                id: p.id,
+                address: p.address,
+                type: p.type,
+                status: p.status,
+                mortgageHolder: p.mortgage_holder,
+                purchasePrice: parseFloat(p.purchase_price) || 0,
+                currentEstValue: parseFloat(p.current_est_value) || 0,
+                monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
+                monthlyInsurance: parseFloat(p.monthly_insurance) || 0,
+                monthlyPropertyTax: parseFloat(p.monthly_property_tax) || 0,
+                monthlyOtherCosts: parseFloat(p.monthly_other_costs) || 0,
+                monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
+                ownership: p.ownership,
+                linkedWebsites: p.linked_websites || [],
+                rentRoll: [],
+                workRequests: [],
+              }))
+              setProperties(reloadedProperties)
+            } else {
+              // If no properties returned, keep current state (might be empty)
+              console.warn('No properties returned after reload')
+            }
+          }
+        } catch (reloadError) {
+          console.error('Failed to reload properties after save:', reloadError)
+          // Don't throw - save was successful, just reload failed
+        }
+        
         return // Success - SaveButton will show success state
       } else {
         const errorData = await response.json()
