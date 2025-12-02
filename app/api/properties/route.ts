@@ -34,21 +34,15 @@ export async function GET(request: NextRequest) {
       console.warn('Could not fetch workspaces, falling back to user_id filter:', workspaceError.message)
     }
 
-    // Build query - always filter by user_id, and optionally by workspace_id
-    // This ensures we get all properties for the user, regardless of workspace setup
-    let query = supabaseAdmin
+    // Build query - always filter by user_id to ensure we get all user's properties
+    // This ensures properties are found even if workspace system has issues
+    // We filter by user_id first, which will get all properties for this user
+    // regardless of workspace_id value (null, workspace_id, etc.)
+    const { data, error } = await supabaseAdmin
       .from('properties')
       .select('*')
-      .eq('user_id', userId) // Always filter by user_id
-    
-    // Additionally filter by workspace if available
-    if (workspaceIds.length > 0) {
-      // Get properties that belong to user's workspaces OR have null workspace_id (legacy)
-      query = query.or(`workspace_id.in.(${workspaceIds.join(',')}),workspace_id.is.null`)
-    }
-    // If no workspaces, we already have user_id filter, which will get all user's properties
-    
-    const { data, error } = await query.order('created_at', { ascending: false })
+      .eq('user_id', userId) // Always filter by user_id - this is the primary filter
+      .order('created_at', { ascending: false })
 
     if (error) {
       console.error('Error fetching properties:', error)
