@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch workspace names for each invitation
     if (invitations && invitations.length > 0) {
-      const workspaceIds = [...new Set(invitations.map(inv => inv.workspace_id))]
+      const workspaceIds = Array.from(new Set(invitations.map(inv => inv.workspace_id)))
       const { data: workspaces } = await supabaseAdmin
         .from('workspaces')
         .select('id, name')
