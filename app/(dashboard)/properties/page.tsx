@@ -167,10 +167,10 @@ export default function PropertiesPage() {
           const data = await response.json()
           console.log('Loaded properties from database:', data.properties?.length || 0)
           
-          // Always set properties, even if empty (to clear mock data)
+          // Always set properties from database
           if (data.properties && Array.isArray(data.properties)) {
             const loadedProperties: Property[] = data.properties.map((p: any) => ({
-              id: p.id,
+              id: p.id, // Use database ID (UUID)
               address: p.address,
               type: p.type,
               status: p.status,
@@ -187,9 +187,11 @@ export default function PropertiesPage() {
               rentRoll: [], // TODO: Load from rent_roll_units table
               workRequests: [], // TODO: Load from work_requests table
             }))
+            console.log('Loaded properties from database on mount:', loadedProperties.length)
             setProperties(loadedProperties)
           } else {
             // No properties in database, set empty array
+            console.log('No properties in database, setting empty array')
             setProperties([])
           }
         } else {
@@ -364,9 +366,28 @@ export default function PropertiesPage() {
   }
 
   // Handle delete property
-  const handleDeleteProperty = (propertyId: string) => {
-    if (confirm("Are you sure you want to delete this property? This action cannot be undone.")) {
-      setProperties(properties.filter((p) => p.id !== propertyId))
+  const handleDeleteProperty = async (propertyId: string) => {
+    if (!confirm("Are you sure you want to delete this property? This action cannot be undone.")) {
+      return
+    }
+
+    try {
+      // Delete from database first
+      const response = await fetch(`/api/properties/${propertyId}`, {
+        method: 'DELETE',
+      })
+
+      if (response.ok) {
+        // Remove from local state after successful deletion
+        setProperties(properties.filter((p) => p.id !== propertyId))
+        console.log('Property deleted successfully')
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Failed to delete property')
+      }
+    } catch (error: any) {
+      console.error('Error deleting property:', error)
+      alert(`Failed to delete property: ${error.message || 'Unknown error'}`)
     }
   }
 
@@ -490,7 +511,7 @@ export default function PropertiesPage() {
             
             if (reloadData.properties && Array.isArray(reloadData.properties)) {
               const reloadedProperties: Property[] = reloadData.properties.map((p: any) => ({
-                id: p.id,
+                id: p.id, // Use database ID (UUID)
                 address: p.address,
                 type: p.type,
                 status: p.status,
@@ -507,19 +528,22 @@ export default function PropertiesPage() {
                 rentRoll: [],
                 workRequests: [],
               }))
+              console.log('Setting reloaded properties:', reloadedProperties.length)
               setProperties(reloadedProperties)
             } else {
-              // If no properties returned, set empty array
-              console.warn('No properties returned after reload, setting empty array')
-              setProperties([])
+              // If no properties returned, keep current state (don't clear)
+              console.warn('No properties returned after reload, keeping current state')
+              // Don't setProperties([]) - this would clear everything
             }
           } else {
             const errorData = await reloadResponse.json().catch(() => ({}))
             console.error('Failed to reload properties after save:', errorData)
+            // Don't clear properties if reload fails - keep current state
           }
         } catch (reloadError) {
           console.error('Failed to reload properties after save:', reloadError)
           // Don't throw - save was successful, just reload failed
+          // Keep current properties state - don't clear them
         }
         
         return // Success - SaveButton will show success state

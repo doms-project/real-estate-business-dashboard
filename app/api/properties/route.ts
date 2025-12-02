@@ -152,8 +152,15 @@ export async function POST(request: NextRequest) {
       
       // Preserve ID if it exists and is a valid UUID (from database)
       // This allows upsert to update existing properties
-      if (prop.id && typeof prop.id === 'string' && prop.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-        propertyToInsert.id = prop.id
+      // Don't include ID if it's not a UUID (e.g., temporary IDs like "1", "2", etc.)
+      if (prop.id && typeof prop.id === 'string') {
+        const isUUID = prop.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+        if (isUUID) {
+          propertyToInsert.id = prop.id
+        } else {
+          // Temporary ID (like "1", "2", etc.) - don't include it, let database generate new UUID
+          console.log(`Property has temporary ID "${prop.id}", will get new UUID from database`)
+        }
       }
 
       // Note: We intentionally exclude:
