@@ -216,9 +216,15 @@ Return the SQL query in this JSON format:
 
       // Step 2: Execute SQL query
       try {
+        console.log(`Executing SQL query: ${sqlQuery}`)
         queryResults = await runSupabaseQuery(sqlQuery)
+        console.log(`Query returned ${queryResults.length} rows`)
+        if (queryResults.length > 0) {
+          console.log(`Sample result:`, JSON.stringify(queryResults[0], null, 2))
+        }
       } catch (queryError) {
         console.error("SQL execution error:", queryError)
+        console.error(`Failed SQL: ${sqlQuery}`)
         // If SQL execution fails, continue without data
         queryResults = []
       }
@@ -232,13 +238,21 @@ Return the SQL query in this JSON format:
     // Step 3: Analyze results and generate insights
     const hasData = queryResults.length > 0
     const dataSummary = hasData 
-      ? `Here's the data I found:
+      ? `Here's the data I found from the database:
 
 ${JSON.stringify(queryResults, null, 2)}
 
-Database Schema Context:
-${dbSchema}`
-      : `I couldn't find specific data in the database for this question, but I can still help.`
+**SQL Query Used:** ${sqlQuery}
+
+**Database Schema Context:**
+${dbSchema}
+
+**IMPORTANT:** Reference the actual data numbers in your response. For example, if the query returned 5 properties, say "You have 5 properties". If it shows specific amounts, mention them.`
+      : `I couldn't find specific data in the database for this question. 
+
+**SQL Query Attempted:** ${sqlQuery || 'No SQL query was generated'}
+
+**Note:** I can still provide general business coaching advice, but I don't have access to your specific data for this question.`
 
     const analysisPrompt = `${AI_COACH_SYSTEM_PROMPT}
 
@@ -248,11 +262,12 @@ ${dataSummary}
 
 **Your Response Should:**
 - Be SHORT (2-4 sentences, ~50-150 words)
-- Reference specific numbers from the data if available
+- Reference specific numbers from the data if available (e.g., "You have 5 properties", "Your total monthly cost is $1,200")
 - Be conversational and friendly
 - Ask ONE follow-up question to continue the conversation
 - Only provide detailed analysis if they explicitly asked for it
 - Focus on property management data if relevant
+- If you have data, USE IT - mention the actual numbers!
 
 **Remember:** Keep it brief and start a conversation, don't write an essay!`
 
@@ -377,13 +392,13 @@ ${dataSummary}
     return NextResponse.json({
       reply,
       cached: false,
-      // Include query info in development (remove in production for security)
-      ...(process.env.NODE_ENV === 'development' && {
-        debug: {
-          sqlQuery: sqlQuery || 'No SQL generated',
-          resultCount: queryResults.length,
-        },
-      }),
+      // Include query info so user can see what data was accessed
+      dataInfo: {
+        sqlQuery: sqlQuery || 'No SQL generated',
+        resultCount: queryResults.length,
+        hasData: queryResults.length > 0,
+        sampleData: queryResults.length > 0 ? queryResults.slice(0, 3) : null, // First 3 rows as sample
+      },
     })
   } catch (error) {
     console.error("AI Coach API error:", error)

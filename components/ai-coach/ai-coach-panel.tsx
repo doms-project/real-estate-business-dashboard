@@ -92,44 +92,83 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
       const contentType = response.headers.get("content-type") || ""
       
       if (contentType.includes("text/plain") || contentType.includes("text/event-stream")) {
-        // Handle streaming response - plain text chunks
+        // Handle streaming response - plain text chunks with typing simulation
         setIsLoading(false) // Stop loading indicator once streaming starts
         
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
-        let accumulatedText = ""
+        let fullText = ""
+        let displayedText = ""
         let hasReceivedFirstChunk = false
+        let typingTimeout: NodeJS.Timeout | null = null
 
         if (!reader) {
           throw new Error("No response body")
+        }
+
+        // Typing simulation - add characters one at a time
+        const typeNextChar = () => {
+          if (displayedText.length < fullText.length) {
+            displayedText = fullText.slice(0, displayedText.length + 1)
+            
+            setMessages((prev) => {
+              const newMessages = [...prev]
+              const lastMessage = newMessages[newMessages.length - 1]
+              if (lastMessage && lastMessage.role === "assistant") {
+                lastMessage.content = displayedText
+              }
+              return newMessages
+            })
+            
+            // Schedule next character (faster typing - 15-25ms per char)
+            const nextChar = fullText[displayedText.length]
+            const delay = nextChar && /[\s.,!?]/.test(nextChar) ? 15 : 20
+            typingTimeout = setTimeout(typeNextChar, delay)
+          }
         }
 
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
 
-          // Decode chunk and append immediately
+          // Decode chunk and append to full text
           const chunk = decoder.decode(value, { stream: true })
-          if (chunk && chunk.trim()) {
+          if (chunk) {
             // Replace "Thinking..." with first chunk, then append subsequent chunks
             if (!hasReceivedFirstChunk) {
-              accumulatedText = chunk
+              fullText = chunk
+              displayedText = ""
               hasReceivedFirstChunk = true
+              // Start typing simulation immediately
+              typeNextChar()
             } else {
-              accumulatedText += chunk
+              // Append new chunk and continue typing
+              fullText += chunk
+              // If typing is caught up, continue typing new content
+              if (!typingTimeout && displayedText.length >= fullText.length - chunk.length) {
+                typeNextChar()
+              }
             }
-            
-            // Update the assistant message in real-time with each chunk
+          }
+        }
+        
+        // Ensure final text is displayed (wait for typing to catch up)
+        const waitForTyping = () => {
+          if (displayedText.length < fullText.length) {
+            setTimeout(waitForTyping, 50)
+          } else {
+            // Typing complete
             setMessages((prev) => {
               const newMessages = [...prev]
               const lastMessage = newMessages[newMessages.length - 1]
               if (lastMessage && lastMessage.role === "assistant") {
-                lastMessage.content = accumulatedText
+                lastMessage.content = fullText
               }
               return newMessages
             })
           }
         }
+        waitForTyping()
         
         // Ensure we have content (remove "Thinking..." if no chunks received)
         if (!hasReceivedFirstChunk) {
