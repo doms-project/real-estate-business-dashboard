@@ -72,13 +72,21 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
       })
 
       if (!response.ok) {
-        throw new Error("Failed to get AI response")
+        const errorData = await response.json().catch(() => ({}))
+        const errorMsg = errorData.error || errorData.details || "Failed to get AI response"
+        throw new Error(errorMsg)
       }
 
       const data = await response.json()
+      
+      // Check if there's an error in the response
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
       const assistantMessage: Message = {
         role: "assistant",
-        content: data.reply,
+        content: data.reply || "I apologize, but I couldn't generate a response.",
       }
 
       setMessages((prev) => [...prev, assistantMessage])
@@ -86,7 +94,9 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
       console.error("Error sending message:", error)
       const errorMessage: Message = {
         role: "assistant",
-        content: "I apologize, but I'm having trouble processing your request right now. Please try again in a moment.",
+        content: error instanceof Error 
+          ? `Error: ${error.message}` 
+          : "I apologize, but I'm having trouble processing your request right now. Please try again in a moment.",
       }
       setMessages((prev) => [...prev, errorMessage])
     } finally {
