@@ -269,15 +269,17 @@ ${dataSummary}
             let fullResponse = ""
             try {
               // Process stream chunks - send immediately as they arrive
+              let chunkCount = 0
               for await (const chunk of stream.stream) {
                 try {
                   const chunkText = chunk.text()
                   if (chunkText) {
+                    chunkCount++
                     fullResponse += chunkText
                     // Send each chunk immediately - don't buffer
-                    // Flush immediately to ensure real-time streaming
+                    // Send as UTF-8 encoded text
                     controller.enqueue(encoder.encode(chunkText))
-                    // Force flush (though ReadableStream should handle this)
+                    console.log(`Sent chunk ${chunkCount}, length: ${chunkText.length}`)
                   }
                 } catch (chunkError) {
                   console.warn("Error processing chunk:", chunkError)
@@ -285,7 +287,7 @@ ${dataSummary}
                 }
               }
               
-              console.log(`Streaming complete. Total chunks processed. Full response length: ${fullResponse.length}`)
+              console.log(`Streaming complete. Processed ${chunkCount} chunks. Total length: ${fullResponse.length}`)
               
               // Cache the full response after streaming completes
               setCachedResponse(user.id, message, fullResponse, {
@@ -305,10 +307,11 @@ ${dataSummary}
 
         return new Response(readableStream, {
           headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
+            'Content-Type': 'text/plain; charset=utf-8', // Use plain text instead of event-stream
+            'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
             'X-Accel-Buffering': 'no', // Disable buffering in nginx
+            'Transfer-Encoding': 'chunked',
           },
         })
       } catch (geminiError: any) {

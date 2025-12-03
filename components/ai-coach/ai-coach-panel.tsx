@@ -59,11 +59,10 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
     setInput("")
     setIsLoading(true)
 
-    // Create placeholder for streaming response
-    const assistantMessageId = Date.now().toString()
+    // Create placeholder for streaming response with thinking indicator
     const assistantMessage: Message = {
       role: "assistant",
-      content: "",
+      content: "Thinking...", // Show thinking immediately
     }
     setMessages((prev) => [...prev, assistantMessage])
 
@@ -89,14 +88,17 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
         throw new Error(errorMsg)
       }
 
-      // Check if response is streaming (text/event-stream) or JSON
+      // Check if response is streaming (text/plain or text/event-stream) or JSON
       const contentType = response.headers.get("content-type") || ""
       
-      if (contentType.includes("text/event-stream")) {
+      if (contentType.includes("text/plain") || contentType.includes("text/event-stream")) {
         // Handle streaming response - plain text chunks
+        setIsLoading(false) // Stop loading indicator once streaming starts
+        
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
         let accumulatedText = ""
+        let hasReceivedFirstChunk = false
 
         if (!reader) {
           throw new Error("No response body")
@@ -108,8 +110,14 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
 
           // Decode chunk and append immediately
           const chunk = decoder.decode(value, { stream: true })
-          if (chunk) {
-            accumulatedText += chunk
+          if (chunk && chunk.trim()) {
+            // Replace "Thinking..." with first chunk, then append subsequent chunks
+            if (!hasReceivedFirstChunk) {
+              accumulatedText = chunk
+              hasReceivedFirstChunk = true
+            } else {
+              accumulatedText += chunk
+            }
             
             // Update the assistant message in real-time with each chunk
             setMessages((prev) => {
@@ -121,6 +129,18 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
               return newMessages
             })
           }
+        }
+        
+        // Ensure we have content (remove "Thinking..." if no chunks received)
+        if (!hasReceivedFirstChunk) {
+          setMessages((prev) => {
+            const newMessages = [...prev]
+            const lastMessage = newMessages[newMessages.length - 1]
+            if (lastMessage && lastMessage.role === "assistant") {
+              lastMessage.content = "I'm processing your request..."
+            }
+            return newMessages
+          })
         }
       } else {
         // Handle non-streaming JSON response (fallback or cached)
