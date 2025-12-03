@@ -79,7 +79,7 @@ Return the SQL query in this JSON format:
   "sql_query": "SELECT ... FROM ... WHERE user_id = '${user.id}' ..."
 }`
 
-    let sqlQuery: string
+    let sqlQuery: string = ''
     let queryResults: any[] = []
 
     try {
