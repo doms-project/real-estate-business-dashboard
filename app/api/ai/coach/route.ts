@@ -59,19 +59,19 @@ export async function POST(request: Request) {
     }
 
     // Initialize Gemini
-    let genAI: GoogleGenerativeAI
+    const genAI = new GoogleGenerativeAI(geminiApiKey)
     let model: any
+    
+    // Try gemini-1.5-pro first, fallback to gemini-pro
     try {
-      genAI = new GoogleGenerativeAI(geminiApiKey)
-      // Use gemini-1.5-pro (latest) or fallback to gemini-pro
       model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" })
     } catch (initError) {
-      console.error("Failed to initialize Gemini:", initError)
-      // Try fallback model
+      console.warn("gemini-1.5-pro not available, trying gemini-pro:", initError)
       try {
         model = genAI.getGenerativeModel({ model: "gemini-pro" })
       } catch (fallbackError) {
-        throw new Error(`Failed to initialize Gemini AI: ${initError instanceof Error ? initError.message : String(initError)}`)
+        console.error("Both Gemini models failed:", { initError, fallbackError })
+        throw new Error(`Failed to initialize Gemini AI: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`)
       }
     }
 
