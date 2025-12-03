@@ -62,11 +62,13 @@ export function setCachedResponse(
   // Clean up old entries periodically (keep cache size reasonable)
   if (responseCache.size > 100) {
     const now = Date.now()
-    for (const [key, entry] of responseCache.entries()) {
+    const keysToDelete: string[] = []
+    responseCache.forEach((entry, key) => {
       if (now - entry.timestamp > CACHE_TTL) {
-        responseCache.delete(key)
+        keysToDelete.push(key)
       }
-    }
+    })
+    keysToDelete.forEach(key => responseCache.delete(key))
   }
 }
 
@@ -74,11 +76,13 @@ export function setCachedResponse(
  * Clear cache for a specific user (optional utility)
  */
 export function clearUserCache(userId: string): void {
-  for (const [key] of responseCache.entries()) {
+  const keysToDelete: string[] = []
+  responseCache.forEach((_, key) => {
     if (key.startsWith(`${userId}:`)) {
-      responseCache.delete(key)
+      keysToDelete.push(key)
     }
-  }
+  })
+  keysToDelete.forEach(key => responseCache.delete(key))
 }
 
 /**
