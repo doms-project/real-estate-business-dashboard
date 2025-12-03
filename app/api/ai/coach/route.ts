@@ -91,6 +91,7 @@ export async function POST(request: Request) {
     const dbSchema = getDatabaseSchema()
 
     // Step 1: Generate SQL query from user question
+    // Make the query more targeted based on question context
     const sqlGenerationPrompt = `You are a PostgreSQL/Supabase SQL expert. Generate a SQL query to answer the user's question.
 
 Database Schema:
@@ -103,8 +104,12 @@ Important Rules:
 2. Use ONLY tables and columns that exist in the schema above
 3. Always filter by user_id = '${user.id}' to ensure users only see their own data
 4. Return ONLY the SQL query, no explanations or markdown formatting
-5. For SELECT queries, limit results to a reasonable number (e.g., LIMIT 100)
+5. For SELECT queries, limit results to a reasonable number (e.g., LIMIT 50 for lists, no limit for counts/sums)
 6. Use proper PostgreSQL syntax (e.g., use TEXT instead of VARCHAR, use DECIMAL for money)
+7. Focus on the MOST RELEVANT data for the question - don't query everything
+8. If the question is about properties, prioritize the properties table and related tables (rent_roll_units, work_requests)
+9. If the question is about subscriptions, focus on the subscriptions table
+10. If the question is about clients, focus on ghl_clients and ghl_weekly_metrics tables
 
 Return the SQL query in this JSON format:
 {
@@ -206,32 +211,31 @@ Return the SQL query in this JSON format:
     }
 
     // Step 3: Analyze results and generate insights
-    const analysisPrompt = queryResults.length > 0
-      ? `${AI_COACH_SYSTEM_PROMPT}
+    const hasData = queryResults.length > 0
+    const dataSummary = hasData 
+      ? `Here's the data I found:
 
-I ran a SQL query to answer the user's question, and here are the results:
-
-Original Question: ${message}
-
-Query Results (JSON):
 ${JSON.stringify(queryResults, null, 2)}
 
 Database Schema Context:
-${dbSchema}
+${dbSchema}`
+      : `I couldn't find specific data in the database for this question, but I can still help.`
 
-Based on the query results and the original question, provide:
-1. A clear summary of what the data shows
-2. 3-5 actionable insights for improving their business
-3. Specific recommendations based on the data
+    const analysisPrompt = `${AI_COACH_SYSTEM_PROMPT}
 
-Be practical, concise, and actionable. Use markdown formatting for readability.`
-      : `${AI_COACH_SYSTEM_PROMPT}
+**User's Question:** "${message}"
 
-The user asked: "${message}"
+${dataSummary}
 
-I wasn't able to query the database for this question, but I can still provide general business coaching advice.
+**Your Response Should:**
+- Be SHORT (2-4 sentences, ~50-150 words)
+- Reference specific numbers from the data if available
+- Be conversational and friendly
+- Ask ONE follow-up question to continue the conversation
+- Only provide detailed analysis if they explicitly asked for it
+- Focus on property management data if relevant
 
-Provide helpful guidance based on the question. Be practical, concise, and actionable. Use markdown formatting for readability.`
+**Remember:** Keep it brief and start a conversation, don't write an essay!`
 
     // Generate final response
     let reply: string = ""
