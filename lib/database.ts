@@ -22,13 +22,24 @@ export async function runSupabaseQuery(sql: string): Promise<any[]> {
   }
 
   // Use pg library for direct PostgreSQL connection
-  const { Pool } = await import('pg')
+  let Pool: any
+  try {
+    const pgModule = await import('pg')
+    Pool = pgModule.Pool
+    if (!Pool) {
+      throw new Error("pg.Pool is not available")
+    }
+  } catch (importError) {
+    console.error("Failed to import pg library:", importError)
+    throw new Error(`Failed to import PostgreSQL client library: ${importError instanceof Error ? importError.message : String(importError)}`)
+  }
 
   const pool = new Pool({
     connectionString: dbUrl,
     ssl: {
       rejectUnauthorized: false, // Supabase requires SSL
     },
+    max: 1, // Limit connections for serverless
   })
 
   try {
@@ -36,6 +47,7 @@ export async function runSupabaseQuery(sql: string): Promise<any[]> {
     return result.rows
   } catch (error) {
     console.error("Error executing SQL query:", error)
+    console.error("SQL query was:", sql.substring(0, 200)) // Log first 200 chars
     throw new Error(`Failed to execute SQL query: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     await pool.end()

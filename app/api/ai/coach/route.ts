@@ -59,8 +59,21 @@ export async function POST(request: Request) {
     }
 
     // Initialize Gemini
-    const genAI = new GoogleGenerativeAI(geminiApiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" })
+    let genAI: GoogleGenerativeAI
+    let model: any
+    try {
+      genAI = new GoogleGenerativeAI(geminiApiKey)
+      // Use gemini-1.5-pro (latest) or fallback to gemini-pro
+      model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" })
+    } catch (initError) {
+      console.error("Failed to initialize Gemini:", initError)
+      // Try fallback model
+      try {
+        model = genAI.getGenerativeModel({ model: "gemini-pro" })
+      } catch (fallbackError) {
+        throw new Error(`Failed to initialize Gemini AI: ${initError instanceof Error ? initError.message : String(initError)}`)
+      }
+    }
 
     // Get database schema for context
     const dbSchema = getDatabaseSchema()
