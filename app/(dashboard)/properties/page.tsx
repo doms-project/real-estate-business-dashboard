@@ -1211,7 +1211,6 @@ export default function PropertiesPage() {
               </TableHead>
               <TableHead className="text-right">Actions</TableHead>
               <TableHead className="w-12"></TableHead>
-              <TableHead className="w-12"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1407,43 +1406,6 @@ export default function PropertiesPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        // Add a new property right after this one
-                        const currentIndex = properties.findIndex(p => p.id === property.id)
-                        const newProperty: Property = {
-                          id: `temp-${Date.now()}`,
-                          address: '',
-                          type: '',
-                          status: 'vacant',
-                          totalMortgageAmount: 0,
-                          purchasePrice: 0,
-                          currentEstValue: 0,
-                          monthlyMortgagePayment: 0,
-                          monthlyInsurance: 0,
-                          monthlyPropertyTax: 0,
-                          monthlyOtherCosts: 0,
-                          monthlyGrossRent: 0,
-                          rentRoll: [],
-                          workRequests: [],
-                        }
-                        const newProperties = [...properties]
-                        newProperties.splice(currentIndex + 1, 0, newProperty)
-                        setProperties(newProperties)
-                        // Focus on the address field of the new row
-                        setTimeout(() => {
-                          handleCellClick(newProperty.id, "address", "", "")
-                        }, 100)
-                      }}
-                      className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20"
-                      title="Add property row"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
                 </TableRow>
               )
             })}
@@ -1468,7 +1430,6 @@ export default function PropertiesPage() {
               >
                 {formatCurrency(portfolioTotals.totalMonthlyCashflow)}
               </TableCell>
-              <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
