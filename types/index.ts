@@ -67,6 +67,7 @@ export interface Property {
   monthlyPropertyTax: number
   monthlyOtherCosts: number
   monthlyGrossRent: number
+  monthlyTotalCosts?: number // Optional: if set, use this instead of calculating
   // Operational fields
   rentRoll?: RentRollUnit[]
   workRequests?: WorkRequest[]

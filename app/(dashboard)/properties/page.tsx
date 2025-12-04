@@ -30,7 +30,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X, Minus } from "lucide-react"
+import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X, Minus, BarChart3, TrendingUp, Lightbulb } from "lucide-react"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { SaveButton } from "@/components/ui/save-button"
 import { Property } from "@/types"
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
@@ -143,7 +145,7 @@ const mockProperties: Property[] = [
   },
 ]
 
-type SortField = "address" | "status" | "currentEstValue" | "purchasePrice" | "monthlyGrossRent" | "monthlyCashflow" | "roe"
+type SortField = "address" | "status" | "currentEstValue" | "purchasePrice" | "monthlyGrossRent" | "monthlyCashflow" | "roi"
 type SortDirection = "asc" | "desc"
 
 export default function PropertiesPage() {
@@ -154,6 +156,7 @@ export default function PropertiesPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [properties, setProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<string>("parts")
 
   // Share properties data with ELO AI
   useEffect(() => {
@@ -273,8 +276,11 @@ export default function PropertiesPage() {
   const [newCustomFieldType, setNewCustomFieldType] = useState<'text' | 'number'>('text')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Calculate monthly total costs
+  // Calculate monthly total costs (use manual value if set, otherwise calculate)
   const calculateMonthlyCosts = useCallback((property: Property): number => {
+    if (property.monthlyTotalCosts !== undefined && property.monthlyTotalCosts !== null) {
+      return property.monthlyTotalCosts
+    }
     return (
       property.monthlyMortgagePayment +
       property.monthlyInsurance +
@@ -283,17 +289,17 @@ export default function PropertiesPage() {
     )
   }, [])
 
-  // Calculate monthly cashflow
+  // Calculate monthly cashflow (automatically recalculated when total costs change)
   const calculateMonthlyCashflow = useCallback((property: Property): number => {
-    return property.monthlyGrossRent - calculateMonthlyCosts(property)
+    const totalCosts = calculateMonthlyCosts(property)
+    return property.monthlyGrossRent - totalCosts
   }, [calculateMonthlyCosts])
 
-  // Calculate Return on Equity (ROE)
-  const calculateROE = (property: Property): number => {
-    const equity = property.currentEstValue - (property.purchasePrice - (property.purchasePrice * 0.2)) // Assuming 20% down
+  // Calculate Annual Return on Investment (ROI)
+  const calculateROI = (property: Property): number => {
     const annualCashflow = calculateMonthlyCashflow(property) * 12
-    if (equity <= 0) return 0
-    return (annualCashflow / equity) * 100
+    if (property.purchasePrice <= 0) return 0
+    return (annualCashflow / property.purchasePrice) * 100
   }
 
   // Filter properties
@@ -309,12 +315,16 @@ export default function PropertiesPage() {
   const sortedProperties = useMemo(() => {
     if (!sortField) return filteredProperties
 
-    const calcCashflow = (p: Property) => p.monthlyGrossRent - (p.monthlyMortgagePayment + p.monthlyInsurance + p.monthlyPropertyTax + p.monthlyOtherCosts)
-    const calcROE = (p: Property) => {
-      const equity = p.currentEstValue - (p.purchasePrice - (p.purchasePrice * 0.2))
+    const calcCashflow = (p: Property) => {
+      const totalCosts = p.monthlyTotalCosts !== undefined && p.monthlyTotalCosts !== null 
+        ? p.monthlyTotalCosts 
+        : (p.monthlyMortgagePayment + p.monthlyInsurance + p.monthlyPropertyTax + p.monthlyOtherCosts)
+      return p.monthlyGrossRent - totalCosts
+    }
+    const calcROI = (p: Property) => {
       const annualCashflow = calcCashflow(p) * 12
-      if (equity <= 0) return 0
-      return (annualCashflow / equity) * 100
+      if (p.purchasePrice <= 0) return 0
+      return (annualCashflow / p.purchasePrice) * 100
     }
 
     return [...filteredProperties].sort((a, b) => {
@@ -346,9 +356,9 @@ export default function PropertiesPage() {
           aValue = calcCashflow(a)
           bValue = calcCashflow(b)
           break
-        case "roe":
-          aValue = calcROE(a)
-          bValue = calcROE(b)
+        case "roi":
+          aValue = calcROI(a)
+          bValue = calcROI(b)
           break
         default:
           return 0
@@ -445,8 +455,8 @@ export default function PropertiesPage() {
 
   // Handle inline editing
   const handleCellClick = (propertyId: string, field: string, currentValue: any, rawValue?: any) => {
-    // Don't allow editing calculated fields
-    if (field === "monthlyCosts" || field === "monthlyCashflow" || field === "roe") {
+    // Don't allow editing calculated fields (except monthlyTotalCosts which is editable)
+    if (field === "monthlyCashflow" || field === "roi") {
       return
     }
     
@@ -488,11 +498,13 @@ export default function PropertiesPage() {
             "monthlyPropertyTax",
             "monthlyOtherCosts",
             "monthlyGrossRent",
+            "monthlyTotalCosts",
           ].includes(field)
         ) {
           const numValue = parseFloat(editValue.replace(/[$,\s]/g, ""))
           if (!isNaN(numValue)) {
             ;(updated as any)[field] = numValue
+            // If monthlyTotalCosts is updated, cashflow will auto-recalculate
           }
         } else if (field.startsWith("custom_")) {
           // Handle custom fields
@@ -1184,8 +1196,118 @@ export default function PropertiesPage() {
         </div>
       </div>
 
-      {/* Status Filter */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-3 h-auto p-1">
+          <TabsTrigger 
+            value="parts" 
+            className="flex items-center gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Parts
+          </TabsTrigger>
+          <TabsTrigger 
+            value="stats" 
+            className="flex items-center gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white"
+          >
+            <TrendingUp className="h-4 w-4" />
+            Stats
+          </TabsTrigger>
+          <TabsTrigger 
+            value="insights" 
+            className="flex items-center gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white"
+          >
+            <Lightbulb className="h-4 w-4" />
+            Insights
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Parts Tab - Charts and Table View */}
+        <TabsContent value="parts" className="space-y-4">
+          {/* Charts Section */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Cash Flow by Property</CardTitle>
+                <CardDescription>Visual breakdown of cash flow</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {sortedProperties.slice(0, 10).map((property) => {
+                    const cashflow = calculateMonthlyCashflow(property)
+                    const maxCashflow = Math.max(...sortedProperties.map(p => Math.abs(calculateMonthlyCashflow(p))), 1)
+                    const percentage = Math.abs(cashflow) / maxCashflow * 100
+                    return (
+                      <div key={property.id} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="truncate flex-1">{property.address}</span>
+                          <span className={`font-semibold ml-2 ${
+                            cashflow >= 0 ? "text-green-600" : "text-red-600"
+                          }`}>
+                            {formatCurrency(cashflow)}
+                          </span>
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${
+                              cashflow >= 0 ? "bg-green-500" : "bg-red-500"
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Expenses Breakdown</CardTitle>
+                <CardDescription>Total costs by category</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {(() => {
+                    const totalMortgage = sortedProperties.reduce((sum, p) => sum + (p.monthlyMortgagePayment || 0), 0)
+                    const totalInsurance = sortedProperties.reduce((sum, p) => sum + (p.monthlyInsurance || 0), 0)
+                    const totalTax = sortedProperties.reduce((sum, p) => sum + (p.monthlyPropertyTax || 0), 0)
+                    const totalOther = sortedProperties.reduce((sum, p) => sum + (p.monthlyOtherCosts || 0), 0)
+                    const totalCosts = totalMortgage + totalInsurance + totalTax + totalOther
+                    
+                    const expenses = [
+                      { label: "Mortgage Payments", value: totalMortgage, color: "bg-blue-500" },
+                      { label: "Insurance", value: totalInsurance, color: "bg-green-500" },
+                      { label: "Property Tax", value: totalTax, color: "bg-yellow-500" },
+                      { label: "Other Costs", value: totalOther, color: "bg-orange-500" },
+                    ]
+
+                    return expenses.map((expense) => {
+                      const percentage = totalCosts > 0 ? (expense.value / totalCosts) * 100 : 0
+                      return (
+                        <div key={expense.label} className="space-y-1">
+                          <div className="flex items-center justify-between text-sm">
+                            <span>{expense.label}</span>
+                            <span className="font-semibold">{formatCurrency(expense.value)}</span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-2">
+                            <div
+                              className={`h-2 rounded-full ${expense.color}`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Status Filter */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
         <span className="text-sm text-muted-foreground whitespace-nowrap">Filter by status:</span>
         <select
           id="statusFilter"
@@ -1267,10 +1389,10 @@ export default function PropertiesPage() {
               </TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 text-right"
-                onClick={() => handleSort("roe")}
+                onClick={() => handleSort("roi")}
               >
                 <div className="flex items-center justify-end gap-2">
-                  ROE
+                  Annual ROI
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
@@ -1319,7 +1441,7 @@ export default function PropertiesPage() {
             {sortedProperties.map((property) => {
               const monthlyCosts = calculateMonthlyCosts(property)
               const monthlyCashflow = calculateMonthlyCashflow(property)
-              const roe = calculateROE(property)
+              const roi = calculateROI(property)
               
               // Check if property needs attention
               const pendingWorkRequests = property.workRequests?.filter(
@@ -1466,10 +1588,10 @@ export default function PropertiesPage() {
                   <TableCell className="text-right">
                     {renderEditableCell(
                       property.id,
-                      "monthlyCosts",
+                      "monthlyTotalCosts",
                       formatCurrency(monthlyCosts),
                       monthlyCosts,
-                      false
+                      true
                     )}
                   </TableCell>
                   <TableCell
@@ -1488,7 +1610,7 @@ export default function PropertiesPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {renderEditableCell(property.id, "roe", formatPercentage(roe), roe, false)}
+                    {renderEditableCell(property.id, "roi", formatPercentage(roi), roi, false)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Link href={`/properties/${property.id}/details`}>
@@ -1560,6 +1682,301 @@ export default function PropertiesPage() {
           </TableFooter>
         </Table>
       </div>
+        </TabsContent>
+
+        {/* Stats Tab - Key Metrics and Numbers */}
+        <TabsContent value="stats" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Properties</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{sortedProperties.length}</div>
+                <p className="text-xs text-muted-foreground">
+                  {sortedProperties.filter(p => p.status === 'rented').length} rented
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Portfolio Value</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(portfolioTotals.totalEstValue)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Average: {formatCurrency(sortedProperties.length > 0 ? portfolioTotals.totalEstValue / sortedProperties.length : 0)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Monthly Cash Flow</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${
+                  portfolioTotals.totalMonthlyCashflow >= 0
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}>
+                  {formatCurrency(portfolioTotals.totalMonthlyCashflow)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Annual: {formatCurrency(portfolioTotals.totalMonthlyCashflow * 12)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Average ROI</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatPercentage(
+                    sortedProperties.length > 0
+                      ? sortedProperties.reduce((sum, p) => sum + calculateROI(p), 0) / sortedProperties.length
+                      : 0
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {sortedProperties.filter(p => calculateROI(p) > 10).length} properties &gt; 10%
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Top Performers</CardTitle>
+                <CardDescription>Properties with highest ROI</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {[...sortedProperties]
+                    .sort((a, b) => calculateROI(b) - calculateROI(a))
+                    .slice(0, 5)
+                    .map((p) => (
+                      <div key={p.id} className="flex items-center justify-between p-2 rounded hover:bg-muted">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{p.address}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Cash Flow: {formatCurrency(calculateMonthlyCashflow(p))}/mo
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-green-600">
+                            {formatPercentage(calculateROI(p))}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Needs Attention</CardTitle>
+                <CardDescription>Properties with negative cash flow or low ROI</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {[...sortedProperties]
+                    .filter((p) => calculateMonthlyCashflow(p) < 0 || calculateROI(p) < 5)
+                    .sort((a, b) => calculateMonthlyCashflow(a) - calculateMonthlyCashflow(b))
+                    .slice(0, 5)
+                    .map((p) => (
+                      <div key={p.id} className="flex items-center justify-between p-2 rounded hover:bg-muted">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{p.address}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Cash Flow: {formatCurrency(calculateMonthlyCashflow(p))}/mo
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-bold ${
+                            calculateROI(p) < 0 ? "text-red-600" : "text-yellow-600"
+                          }`}>
+                            {formatPercentage(calculateROI(p))}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  {sortedProperties.filter((p) => calculateMonthlyCashflow(p) < 0 || calculateROI(p) < 5).length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">All properties performing well!</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Portfolio Statistics</CardTitle>
+              <CardDescription>Key metrics and outliers</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Highest Cash Flow</p>
+                  <p className="text-lg font-semibold">
+                    {sortedProperties.length > 0
+                      ? formatCurrency(Math.max(...sortedProperties.map((p) => calculateMonthlyCashflow(p))))
+                      : "$0"}
+                  </p>
+                  {sortedProperties.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {sortedProperties.find((p) => 
+                        calculateMonthlyCashflow(p) === Math.max(...sortedProperties.map((p) => calculateMonthlyCashflow(p)))
+                      )?.address}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Lowest Cash Flow</p>
+                  <p className="text-lg font-semibold">
+                    {sortedProperties.length > 0
+                      ? formatCurrency(Math.min(...sortedProperties.map((p) => calculateMonthlyCashflow(p))))
+                      : "$0"}
+                  </p>
+                  {sortedProperties.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {sortedProperties.find((p) => 
+                        calculateMonthlyCashflow(p) === Math.min(...sortedProperties.map((p) => calculateMonthlyCashflow(p)))
+                      )?.address}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Average Monthly Costs</p>
+                  <p className="text-lg font-semibold">
+                    {formatCurrency(
+                      sortedProperties.length > 0
+                        ? sortedProperties.reduce((sum, p) => sum + calculateMonthlyCosts(p), 0) / sortedProperties.length
+                        : 0
+                    )}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Insights Tab - AI-Powered Recommendations */}
+        <TabsContent value="insights" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Portfolio Insights</CardTitle>
+              <CardDescription>AI-powered recommendations to improve profitability</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {sortedProperties.length === 0 ? (
+                  <p className="text-muted-foreground">Add properties to get insights</p>
+                ) : (
+                  <>
+                    {sortedProperties.filter((p) => calculateMonthlyCashflow(p) < 0).length > 0 && (
+                      <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
+                        <h3 className="font-semibold mb-2 text-yellow-900 dark:text-yellow-100">
+                          ⚠️ Negative Cash Flow Properties
+                        </h3>
+                        <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-2">
+                          {sortedProperties.filter((p) => calculateMonthlyCashflow(p) < 0).length} property(ies) have negative cash flow:
+                        </p>
+                        <ul className="list-disc list-inside text-sm text-yellow-800 dark:text-yellow-200 space-y-1">
+                          {sortedProperties
+                            .filter((p) => calculateMonthlyCashflow(p) < 0)
+                            .map((p) => (
+                              <li key={p.id}>
+                                {p.address}: {formatCurrency(calculateMonthlyCashflow(p))}/mo
+                                {p.status === 'vacant' && ' - Consider renting to improve cash flow'}
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {sortedProperties.filter((p) => p.status === 'vacant').length > 0 && (
+                      <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                        <h3 className="font-semibold mb-2 text-blue-900 dark:text-blue-100">
+                          💡 Vacant Properties Opportunity
+                        </h3>
+                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+                          {sortedProperties.filter((p) => p.status === 'vacant').length} vacant property(ies) could generate:
+                        </p>
+                        <ul className="list-disc list-inside text-sm text-blue-800 dark:text-blue-200 space-y-1">
+                          {sortedProperties
+                            .filter((p) => p.status === 'vacant')
+                            .map((p) => {
+                              const potentialCashFlow = p.monthlyGrossRent - calculateMonthlyCosts(p)
+                              return (
+                                <li key={p.id}>
+                                  {p.address}: Potential {formatCurrency(potentialCashFlow)}/mo if rented
+                                </li>
+                              )
+                            })}
+                        </ul>
+                      </div>
+                    )}
+
+                    {sortedProperties.filter((p) => calculateROI(p) > 15).length > 0 && (
+                      <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-900/20">
+                        <h3 className="font-semibold mb-2 text-green-900 dark:text-green-100">
+                          🎯 High ROI Properties
+                        </h3>
+                        <p className="text-sm text-green-800 dark:text-green-200 mb-2">
+                          These properties are performing exceptionally well:
+                        </p>
+                        <ul className="list-disc list-inside text-sm text-green-800 dark:text-green-200 space-y-1">
+                          {sortedProperties
+                            .filter((p) => calculateROI(p) > 15)
+                            .sort((a, b) => calculateROI(b) - calculateROI(a))
+                            .map((p) => (
+                              <li key={p.id}>
+                                {p.address}: {formatPercentage(calculateROI(p))} ROI - Consider acquiring similar properties
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="p-4 border rounded-lg">
+                      <h3 className="font-semibold mb-2">📊 Portfolio Optimization Suggestions</h3>
+                      <ul className="list-disc list-inside text-sm space-y-2">
+                        {portfolioTotals.totalMonthlyCashflow < 0 && (
+                          <li className="text-red-600 dark:text-red-400">
+                            Your portfolio has negative cash flow. Consider increasing rent, reducing costs, or selling underperforming properties.
+                          </li>
+                        )}
+                        {sortedProperties.filter((p) => calculateROI(p) < 5).length > sortedProperties.length * 0.3 && (
+                          <li>
+                            {sortedProperties.filter((p) => calculateROI(p) < 5).length} properties have ROI below 5%. 
+                            Consider refinancing, increasing rent, or selling to reinvest in better opportunities.
+                          </li>
+                        )}
+                        {sortedProperties.filter((p) => p.status === 'rented').length > 0 && (
+                          <li>
+                            Average rent per property: {formatCurrency(
+                              sortedProperties
+                                .filter((p) => p.status === 'rented')
+                                .reduce((sum, p) => sum + p.monthlyGrossRent, 0) /
+                                sortedProperties.filter((p) => p.status === 'rented').length
+                            )}/mo
+                          </li>
+                        )}
+                        <li>
+                          Total annual cash flow potential: {formatCurrency(portfolioTotals.totalMonthlyCashflow * 12)}/year
+                        </li>
+                      </ul>
+                    </div>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Import Dialog */}
       <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>

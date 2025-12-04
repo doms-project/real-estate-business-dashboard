@@ -85,12 +85,12 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
       <div className="flex h-16 items-center justify-between border-b px-4">
         {!collapsed ? (
           <div className="flex items-center gap-3">
-            <div className="relative h-10 w-10 flex-shrink-0">
+            <div className="relative h-14 w-14 flex-shrink-0">
               <Image 
                 src="/tenn-men-logo.png" 
                 alt="Tenn Men AI" 
-                width={40} 
-                height={40} 
+                width={56} 
+                height={56} 
                 className="rounded-full object-contain"
                 onError={(e) => {
                   // Hide image on error, show text fallback
@@ -102,12 +102,12 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
           </div>
         ) : (
           <div className="flex items-center justify-center w-full">
-            <div className="relative h-8 w-8 flex-shrink-0">
+            <div className="relative h-10 w-10 flex-shrink-0">
               <Image 
                 src="/tenn-men-logo.png" 
                 alt="Tenn Men AI" 
-                width={32} 
-                height={32} 
+                width={40} 
+                height={40} 
                 className="rounded-full object-contain"
                 onError={(e) => {
                   e.currentTarget.style.display = 'none'
