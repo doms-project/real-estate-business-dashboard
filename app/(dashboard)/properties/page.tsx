@@ -226,6 +226,10 @@ export default function PropertiesPage() {
   const [importSuccess, setImportSuccess] = useState<string>("")
   const [editingCell, setEditingCell] = useState<{ propertyId: string; field: string } | null>(null)
   const [editValue, setEditValue] = useState<string>("")
+  const [customFields, setCustomFields] = useState<Array<{ id: string; name: string; type: 'text' | 'number' }>>([])
+  const [addCustomFieldDialogOpen, setAddCustomFieldDialogOpen] = useState(false)
+  const [newCustomFieldName, setNewCustomFieldName] = useState("")
+  const [newCustomFieldType, setNewCustomFieldType] = useState<'text' | 'number'>('text')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Calculate monthly total costs
@@ -449,6 +453,17 @@ export default function PropertiesPage() {
           if (!isNaN(numValue)) {
             ;(updated as any)[field] = numValue
           }
+        } else if (field.startsWith("custom_")) {
+          // Handle custom fields
+          const customField = customFields.find(f => `custom_${f.id}` === field)
+          if (customField?.type === 'number') {
+            const numValue = parseFloat(editValue.replace(/[$,\s]/g, ""))
+            if (!isNaN(numValue)) {
+              ;(updated as any)[field] = numValue
+            }
+          } else {
+            ;(updated as any)[field] = editValue
+          }
         } else if (field === "address" || field === "type" || field === "mortgageHolder") {
           ;(updated as any)[field] = editValue
         } else if (field === "ownership") {
@@ -656,10 +671,10 @@ export default function PropertiesPage() {
                 handleCellCancel()
               }
             }}
-            className={`h-8 ${field === "mortgageHolder" || field === "address" ? "w-48" : "w-32"}`}
+            className={`h-8 ${field === "mortgageHolder" || field === "address" || field.startsWith("custom_") ? "w-48" : "w-32"}`}
             autoFocus
-            type={typeof rawValue === "number" ? "number" : "text"}
-            placeholder={field === "mortgageHolder" ? "Enter mortgage holder name" : ""}
+            type={typeof rawValue === "number" || (field.startsWith("custom_") && customFields.find(f => `custom_${f.id}` === field)?.type === 'number') ? "number" : "text"}
+            placeholder={field === "mortgageHolder" ? "Enter mortgage holder name" : (field.startsWith("custom_") ? "Enter value" : "")}
           />
           <Button
             variant="ghost"
@@ -1211,6 +1226,22 @@ export default function PropertiesPage() {
               </TableHead>
               <TableHead className="text-right">Actions</TableHead>
               <TableHead className="w-12"></TableHead>
+              {customFields.map((field) => (
+                <TableHead key={field.id} className="text-right">
+                  {field.name}
+                </TableHead>
+              ))}
+              <TableHead className="w-12">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAddCustomFieldDialogOpen(true)}
+                  className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20"
+                  title="Add custom field column"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1406,6 +1437,24 @@ export default function PropertiesPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
+                  {customFields.map((field) => {
+                    const fieldKey = `custom_${field.id}`
+                    const fieldValue = (property as any)[fieldKey] || ""
+                    return (
+                      <TableCell key={field.id} className={field.type === 'number' ? "text-right" : ""}>
+                        {renderEditableCell(
+                          property.id,
+                          fieldKey,
+                          field.type === 'number' 
+                            ? (fieldValue ? formatCurrency(parseFloat(String(fieldValue)) || 0) : "Click to add")
+                            : (fieldValue || "Click to add"),
+                          fieldValue || "",
+                          true,
+                          fieldValue ? "" : "text-muted-foreground italic"
+                        )}
+                      </TableCell>
+                    )
+                  })}
                 </TableRow>
               )
             })}
@@ -1433,6 +1482,9 @@ export default function PropertiesPage() {
               <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
+              {customFields.map((field) => (
+                <TableCell key={field.id}></TableCell>
+              ))}
             </TableRow>
           </TableFooter>
         </Table>
@@ -1610,6 +1662,76 @@ export default function PropertiesPage() {
               disabled={csvData.length === 0 || !validateMapping(fieldMapping).valid}
             >
               Import {csvData.length} Properties
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Custom Field Dialog */}
+      <Dialog open={addCustomFieldDialogOpen} onOpenChange={setAddCustomFieldDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Custom Field Column</DialogTitle>
+            <DialogDescription>
+              Add a new custom field column to track additional property information
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="customFieldName">Field Name</Label>
+              <Input
+                id="customFieldName"
+                value={newCustomFieldName}
+                onChange={(e) => setNewCustomFieldName(e.target.value)}
+                placeholder="e.g., Notes, Year Built, etc."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customFieldType">Field Type</Label>
+              <Select
+                value={newCustomFieldType}
+                onValueChange={(value: 'text' | 'number') => setNewCustomFieldType(value)}
+              >
+                <SelectTrigger id="customFieldType">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="text">Text</SelectItem>
+                  <SelectItem value="number">Number</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setAddCustomFieldDialogOpen(false)
+              setNewCustomFieldName("")
+              setNewCustomFieldType('text')
+            }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (newCustomFieldName.trim()) {
+                  const newField = {
+                    id: `field_${Date.now()}`,
+                    name: newCustomFieldName.trim(),
+                    type: newCustomFieldType,
+                  }
+                  setCustomFields([...customFields, newField])
+                  // Initialize custom field values for all existing properties
+                  setProperties(properties.map(p => ({
+                    ...p,
+                    [`custom_${newField.id}`]: newField.type === 'number' ? 0 : ""
+                  })))
+                  setAddCustomFieldDialogOpen(false)
+                  setNewCustomFieldName("")
+                  setNewCustomFieldType('text')
+                }
+              }}
+              disabled={!newCustomFieldName.trim()}
+            >
+              Add Field
             </Button>
           </DialogFooter>
         </DialogContent>
