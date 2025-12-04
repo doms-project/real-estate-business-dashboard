@@ -175,6 +175,7 @@ export default function PropertiesPage() {
               type: p.type,
               status: p.status,
               mortgageHolder: p.mortgage_holder,
+              totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
               purchasePrice: parseFloat(p.purchase_price) || 0,
               currentEstValue: parseFloat(p.current_est_value) || 0,
               monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
@@ -436,6 +437,7 @@ export default function PropertiesPage() {
           [
             "purchasePrice",
             "currentEstValue",
+            "totalMortgageAmount",
             "monthlyMortgagePayment",
             "monthlyInsurance",
             "monthlyPropertyTax",
@@ -536,6 +538,7 @@ export default function PropertiesPage() {
                 type: p.type,
                 status: p.status,
                 mortgageHolder: p.mortgage_holder,
+                totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
                 purchasePrice: parseFloat(p.purchase_price) || 0,
                 currentEstValue: parseFloat(p.current_est_value) || 0,
                 monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
@@ -695,6 +698,7 @@ export default function PropertiesPage() {
       "Type",
       "Status",
       "Mortgage Holder",
+      "Total Mortgage Amount",
       "Purchase Price",
       "Current Est. Value",
       "Monthly Mortgage Payment",
@@ -709,6 +713,7 @@ export default function PropertiesPage() {
       p.type,
       p.status,
       p.mortgageHolder || "",
+      (p.totalMortgageAmount || 0).toString(),
       p.purchasePrice.toString(),
       p.currentEstValue.toString(),
       p.monthlyMortgagePayment.toString(),
@@ -752,6 +757,7 @@ export default function PropertiesPage() {
       "Type",
       "Status",
       "Mortgage Holder",
+      "Total Mortgage Amount",
       "Purchase Price",
       "Current Est. Value",
       "Monthly Mortgage Payment",
@@ -767,6 +773,7 @@ export default function PropertiesPage() {
         "House",
         "rented",
         "Sample Bank",
+        "400000",
         "500000",
         "550000",
         "2500",
@@ -1028,6 +1035,7 @@ export default function PropertiesPage() {
     { value: "type", label: "Type" },
     { value: "status", label: "Status" },
     { value: "mortgageHolder", label: "Mortgage Holder" },
+    { value: "totalMortgageAmount", label: "Total Mortgage Amount" },
     { value: "purchasePrice", label: "Purchase Price" },
     { value: "currentEstValue", label: "Current Est. Value" },
     { value: "monthlyMortgagePayment", label: "Monthly Mortgage Payment" },
@@ -1090,6 +1098,7 @@ export default function PropertiesPage() {
               address: 'New Property', // Default address so it can be saved
               type: 'residential', // Default type so it can be saved
               status: 'vacant', // Valid status
+              totalMortgageAmount: 0,
               purchasePrice: 0,
               currentEstValue: 0,
               monthlyMortgagePayment: 0,
@@ -1150,6 +1159,8 @@ export default function PropertiesPage() {
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
+              <TableHead>Mortgage Holder</TableHead>
+              <TableHead className="text-right">Total Mortgage</TableHead>
               <TableHead>Partners</TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 text-right"
@@ -1250,6 +1261,24 @@ export default function PropertiesPage() {
                       >
                         {property.status.replace("_", " ")}
                       </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {renderEditableCell(
+                      property.id,
+                      "mortgageHolder",
+                      property.mortgageHolder || "",
+                      property.mortgageHolder || "",
+                      true
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderEditableCell(
+                      property.id,
+                      "totalMortgageAmount",
+                      formatCurrency(property.totalMortgageAmount || 0),
+                      property.totalMortgageAmount || 0,
+                      true
                     )}
                   </TableCell>
                   <TableCell>
@@ -1381,7 +1410,7 @@ export default function PropertiesPage() {
           </TableBody>
           <TableFooter>
             <TableRow className="font-bold bg-muted/50">
-              <TableCell colSpan={3}>Portfolio Totals</TableCell>
+              <TableCell colSpan={5}>Portfolio Totals</TableCell>
               <TableCell className="text-right">
                 {portfolioTotals.totalProperties} Properties
               </TableCell>

@@ -216,6 +216,7 @@ export default function PropertyDetailsPage({ params }: { params: Promise<{ prop
           type: propertyData.type,
           status: propertyData.status,
           mortgageHolder: propertyData.mortgageHolder,
+          totalMortgageAmount: propertyData.totalMortgageAmount || 0,
           purchasePrice: propertyData.purchasePrice,
           currentEstValue: propertyData.currentEstValue,
           monthlyMortgagePayment: propertyData.monthlyMortgagePayment,
@@ -431,6 +432,23 @@ export default function PropertyDetailsPage({ params }: { params: Promise<{ prop
                       handlePropertyFieldChange("mortgageHolder", e.target.value)
                     }
                     placeholder="Bank name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="totalMortgageAmount">Total Mortgage Amount</Label>
+                  <Input
+                    id="totalMortgageAmount"
+                    name="totalMortgageAmount"
+                    type="number"
+                    value={safePropertyData.totalMortgageAmount || 0}
+                    onChange={(e) =>
+                      handlePropertyFieldChange(
+                        "totalMortgageAmount",
+                        parseFloat(e.target.value) || 0
+                      )
+                    }
+                    placeholder="0"
                   />
                 </div>
 

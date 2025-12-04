@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS properties (
   status TEXT NOT NULL CHECK (status IN ('rented', 'vacant', 'under_maintenance', 'sold')),
   -- Financial fields
   mortgage_holder TEXT,
+  total_mortgage_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
   purchase_price DECIMAL(12, 2) NOT NULL DEFAULT 0,
   current_est_value DECIMAL(12, 2) NOT NULL DEFAULT 0,
   monthly_mortgage_payment DECIMAL(10, 2) NOT NULL DEFAULT 0,
@@ -444,6 +445,8 @@ CREATE TRIGGER update_agency_clients_updated_at BEFORE UPDATE ON agency_clients
 
 CREATE TRIGGER update_ghl_clients_updated_at BEFORE UPDATE ON ghl_clients
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
 
 
 

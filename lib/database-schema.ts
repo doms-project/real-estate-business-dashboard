@@ -69,6 +69,7 @@ CREATE TABLE properties (
   type TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('rented', 'vacant', 'under_maintenance', 'sold')),
   mortgage_holder TEXT,
+  total_mortgage_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
   purchase_price DECIMAL(12, 2) NOT NULL DEFAULT 0,
   current_est_value DECIMAL(12, 2) NOT NULL DEFAULT 0,
   monthly_mortgage_payment DECIMAL(10, 2) NOT NULL DEFAULT 0,
@@ -162,4 +163,6 @@ CREATE TABLE ghl_weekly_metrics (
 
   return schema.trim()
 }
+
+
 

@@ -146,6 +146,7 @@ export async function POST(request: NextRequest) {
         type: type,
         status: status,
         mortgage_holder: prop.mortgageHolder ? String(prop.mortgageHolder).trim() : null,
+        total_mortgage_amount: Number(prop.totalMortgageAmount) || 0,
         purchase_price: Number(prop.purchasePrice) || 0,
         current_est_value: Number(prop.currentEstValue) || 0,
         monthly_mortgage_payment: Number(prop.monthlyMortgagePayment) || 0,
