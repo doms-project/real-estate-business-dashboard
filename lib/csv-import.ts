@@ -8,7 +8,6 @@ export type PropertyField =
   | "type"
   | "status"
   | "mortgageHolder"
-  | "totalMortgageAmount"
   | "purchasePrice"
   | "currentEstValue"
   | "monthlyMortgagePayment"
@@ -70,22 +69,11 @@ export function inferPropertyFieldFromHeader(header: string): PropertyField | nu
   if (
     h.includes("mortgage holder") ||
     h.includes("lender") ||
-    (h.includes("bank") && !h.includes("amount") && !h.includes("total")) ||
+    h.includes("bank") ||
     h.includes("mortgage bank") ||
     h.includes("loan provider")
   ) {
     return "mortgageHolder"
-  }
-
-  // Total Mortgage Amount variations
-  if (
-    h.includes("total mortgage") ||
-    h.includes("mortgage amount") ||
-    h.includes("mortgage balance") ||
-    h.includes("loan amount") ||
-    h.includes("principal balance")
-  ) {
-    return "totalMortgageAmount"
   }
 
   // Purchase Price variations
@@ -284,7 +272,6 @@ export function mapCsvRowToProperty(
     type: parseString(get("type")) || "",
     status: parseStatus(get("status")),
     mortgageHolder: parseString(get("mortgageHolder")) || undefined,
-    totalMortgageAmount: parseNumber(get("totalMortgageAmount")),
     purchasePrice: parseNumber(get("purchasePrice")),
     currentEstValue: parseNumber(get("currentEstValue")),
     monthlyMortgagePayment: parseNumber(get("monthlyMortgagePayment")),

@@ -30,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X } from "lucide-react"
+import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X, Minus } from "lucide-react"
 import { SaveButton } from "@/components/ui/save-button"
 import { Property } from "@/types"
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
@@ -169,25 +169,34 @@ export default function PropertiesPage() {
           
           // Always set properties from database
           if (data.properties && Array.isArray(data.properties)) {
-            const loadedProperties: Property[] = data.properties.map((p: any) => ({
-              id: p.id, // Use database ID (UUID)
-              address: p.address,
-              type: p.type,
-              status: p.status,
-              mortgageHolder: p.mortgage_holder,
-              totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
-              purchasePrice: parseFloat(p.purchase_price) || 0,
-              currentEstValue: parseFloat(p.current_est_value) || 0,
-              monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
-              monthlyInsurance: parseFloat(p.monthly_insurance) || 0,
-              monthlyPropertyTax: parseFloat(p.monthly_property_tax) || 0,
-              monthlyOtherCosts: parseFloat(p.monthly_other_costs) || 0,
-              monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
-              ownership: p.ownership,
-              linkedWebsites: p.linked_websites || [],
-              rentRoll: [], // TODO: Load from rent_roll_units table
-              workRequests: [], // TODO: Load from work_requests table
-            }))
+            const loadedProperties: Property[] = data.properties.map((p: any) => {
+              const property: any = {
+                id: p.id, // Use database ID (UUID)
+                address: p.address,
+                type: p.type,
+                status: p.status,
+                mortgageHolder: p.mortgage_holder,
+                totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
+                purchasePrice: parseFloat(p.purchase_price) || 0,
+                currentEstValue: parseFloat(p.current_est_value) || 0,
+                monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
+                monthlyInsurance: parseFloat(p.monthly_insurance) || 0,
+                monthlyPropertyTax: parseFloat(p.monthly_property_tax) || 0,
+                monthlyOtherCosts: parseFloat(p.monthly_other_costs) || 0,
+                monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
+                ownership: p.ownership,
+                linkedWebsites: p.linked_websites || [],
+                rentRoll: [], // TODO: Load from rent_roll_units table
+                workRequests: [], // TODO: Load from work_requests table
+              }
+              // Restore custom fields from JSONB column
+              if (p.custom_fields && typeof p.custom_fields === 'object') {
+                Object.keys(p.custom_fields).forEach(key => {
+                  property[key] = p.custom_fields[key]
+                })
+              }
+              return property
+            })
             console.log('Loaded properties from database on mount:', loadedProperties.length)
             setProperties(loadedProperties)
           } else {
@@ -547,25 +556,34 @@ export default function PropertiesPage() {
             console.log('Reloaded properties after save:', reloadData.properties?.length || 0)
             
             if (reloadData.properties && Array.isArray(reloadData.properties)) {
-              const reloadedProperties: Property[] = reloadData.properties.map((p: any) => ({
-                id: p.id, // Use database ID (UUID)
-                address: p.address,
-                type: p.type,
-                status: p.status,
-                mortgageHolder: p.mortgage_holder,
-                totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
-                purchasePrice: parseFloat(p.purchase_price) || 0,
-                currentEstValue: parseFloat(p.current_est_value) || 0,
-                monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
-                monthlyInsurance: parseFloat(p.monthly_insurance) || 0,
-                monthlyPropertyTax: parseFloat(p.monthly_property_tax) || 0,
-                monthlyOtherCosts: parseFloat(p.monthly_other_costs) || 0,
-                monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
-                ownership: p.ownership,
-                linkedWebsites: p.linked_websites || [],
-                rentRoll: [],
-                workRequests: [],
-              }))
+              const reloadedProperties: Property[] = reloadData.properties.map((p: any) => {
+                const property: any = {
+                  id: p.id, // Use database ID (UUID)
+                  address: p.address,
+                  type: p.type,
+                  status: p.status,
+                  mortgageHolder: p.mortgage_holder,
+                  totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
+                  purchasePrice: parseFloat(p.purchase_price) || 0,
+                  currentEstValue: parseFloat(p.current_est_value) || 0,
+                  monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
+                  monthlyInsurance: parseFloat(p.monthly_insurance) || 0,
+                  monthlyPropertyTax: parseFloat(p.monthly_property_tax) || 0,
+                  monthlyOtherCosts: parseFloat(p.monthly_other_costs) || 0,
+                  monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
+                  ownership: p.ownership,
+                  linkedWebsites: p.linked_websites || [],
+                  rentRoll: [],
+                  workRequests: [],
+                }
+                // Restore custom fields from JSONB column
+                if (p.custom_fields && typeof p.custom_fields === 'object') {
+                  Object.keys(p.custom_fields).forEach(key => {
+                    property[key] = p.custom_fields[key]
+                  })
+                }
+                return property
+              })
               console.log('Setting reloaded properties:', reloadedProperties.length)
               setProperties(reloadedProperties)
             } else {
@@ -1228,7 +1246,28 @@ export default function PropertiesPage() {
               <TableHead className="w-12"></TableHead>
               {customFields.map((field) => (
                 <TableHead key={field.id} className="text-right">
-                  {field.name}
+                  <div className="flex items-center justify-end gap-1">
+                    <span>{field.name}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        // Remove custom field from all properties
+                        const fieldKey = `custom_${field.id}`
+                        setProperties(properties.map(p => {
+                          const updated = { ...p }
+                          delete (updated as any)[fieldKey]
+                          return updated
+                        }))
+                        // Remove from customFields list
+                        setCustomFields(customFields.filter(f => f.id !== field.id))
+                      }}
+                      className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      title="Delete custom field column"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </TableHead>
               ))}
               <TableHead className="w-12">
