@@ -226,6 +226,7 @@ export default function PropertiesPage() {
     }
 
     loadProperties()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvData, setCsvData] = useState<string[][]>([])
