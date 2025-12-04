@@ -85,31 +85,35 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
       <div className="flex h-16 items-center justify-between border-b px-4">
         {!collapsed ? (
           <div className="flex items-center gap-3">
-            <Image 
-              src="/tenn-men-logo.png" 
-              alt="Tenn Men AI" 
-              width={40} 
-              height={40} 
-              className="rounded-full"
-              onError={(e) => {
-                // Fallback if image doesn't exist yet
-                e.currentTarget.style.display = 'none'
-              }}
-            />
+            <div className="relative h-10 w-10 flex-shrink-0">
+              <Image 
+                src="/tenn-men-logo.png" 
+                alt="Tenn Men AI" 
+                width={40} 
+                height={40} 
+                className="rounded-full object-contain"
+                onError={(e) => {
+                  // Hide image on error, show text fallback
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+            </div>
             <h1 className="text-lg font-semibold">Tenn Men AI</h1>
           </div>
         ) : (
           <div className="flex items-center justify-center w-full">
-            <Image 
-              src="/tenn-men-logo.png" 
-              alt="Tenn Men AI" 
-              width={32} 
-              height={32} 
-              className="rounded-full"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none'
-              }}
-            />
+            <div className="relative h-8 w-8 flex-shrink-0">
+              <Image 
+                src="/tenn-men-logo.png" 
+                alt="Tenn Men AI" 
+                width={32} 
+                height={32} 
+                className="rounded-full object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+            </div>
           </div>
         )}
         <div className="flex items-center gap-2">
