@@ -50,7 +50,12 @@ export async function POST(request: Request) {
 
     // Parse request body
     const body = await request.json()
-    const { message, stream: useStreaming = true } = body // Default to streaming
+    const { 
+      message, 
+      stream: useStreaming = true,
+      pageContext = null, // New: page context (e.g., "dashboard", "properties", "agency", "business")
+      pageData = null // New: specific data visible on the page
+    } = body // Default to streaming
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(
@@ -235,7 +240,40 @@ Return the SQL query in this JSON format:
       queryResults = []
     }
 
-    // Step 3: Analyze results and generate insights
+    // Step 3: Build page context information
+    let pageContextInfo = ""
+    if (pageContext) {
+      pageContextInfo = `\n**Current Page Context:** The user is on the "${pageContext}" page.`
+      
+      // Add page-specific guidance
+      switch (pageContext.toLowerCase()) {
+        case "dashboard":
+          pageContextInfo += ` Focus on overall portfolio health, top performers, and biggest opportunities across all their businesses.`
+          break
+        case "properties":
+        case "property":
+          pageContextInfo += ` Focus on individual property performance, cash flow analysis, ROE calculations, and property-specific opportunities.`
+          break
+        case "agency":
+        case "agency management":
+          pageContextInfo += ` Focus on client performance, marketing ROI, growth strategies, and agency metrics.`
+          break
+        case "business":
+        case "business hub":
+          pageContextInfo += ` Focus on campaigns performance, revenue trends, business metrics, and marketing optimization.`
+          break
+        case "campaigns":
+          pageContextInfo += ` Focus on campaign ROI, performance metrics, budget optimization, and marketing strategy.`
+          break
+      }
+    }
+
+    // Add page-specific data if provided
+    if (pageData && typeof pageData === 'object') {
+      pageContextInfo += `\n\n**Page-Specific Data Available:**\n${JSON.stringify(pageData, null, 2)}\n\nUse this data to provide context-aware insights. Reference specific numbers, properties, campaigns, or metrics visible on the page.`
+    }
+
+    // Step 4: Analyze results and generate insights
     const hasData = queryResults.length > 0
     const dataSummary = hasData 
       ? `Here's the data I found from the database:
@@ -247,29 +285,32 @@ ${JSON.stringify(queryResults, null, 2)}
 **Database Schema Context:**
 ${dbSchema}
 
-**IMPORTANT:** Reference the actual data numbers in your response. For example, if the query returned 5 properties, say "You have 5 properties". If it shows specific amounts, mention them.`
+**IMPORTANT:** Reference the actual data numbers in your response. For example, if the query returned 5 properties, say "You have 5 properties". If it shows specific amounts, mention them. Use property addresses, exact dollar amounts, percentages, and specific metrics.`
       : `I couldn't find specific data in the database for this question. 
 
 **SQL Query Attempted:** ${sqlQuery || 'No SQL query was generated'}
 
-**Note:** I can still provide general business coaching advice, but I don't have access to your specific data for this question.`
+**Note:** I can still provide real estate coaching advice based on the page context and general principles, but I don't have access to your specific database data for this question.`
 
     const analysisPrompt = `${AI_COACH_SYSTEM_PROMPT}
 
 **User's Question:** "${message}"
+${pageContextInfo}
 
 ${dataSummary}
 
-**Your Response Should:**
-- Be SHORT (2-4 sentences, ~50-150 words)
-- Reference specific numbers from the data if available (e.g., "You have 5 properties", "Your total monthly cost is $1,200")
-- Be conversational and friendly
-- Ask ONE follow-up question to continue the conversation
-- Only provide detailed analysis if they explicitly asked for it
-- Focus on property management data if relevant
-- If you have data, USE IT - mention the actual numbers!
+**Your Response Guidelines:**
+- Use the page context to tailor your response - if they're on the Properties page, focus on property analysis
+- Reference specific numbers from the database OR page data (e.g., "You have 5 properties", "Your campaign ROAS is 3.2x", "Property at 123 Main St has 18% ROE")
+- Be energetic and motivational but data-driven
+- Provide actionable insights, not just observations
+- Ask ONE follow-up question to move the conversation forward
+- Length: 3-6 sentences for quick answers, 2-3 paragraphs for analysis
+- If analyzing properties: calculate ROE, cash-on-cash return, and cash flow
+- If analyzing campaigns: focus on ROAS, conversion rates, and optimization opportunities
+- Always connect insights to their goals and next steps
 
-**Remember:** Keep it brief and start a conversation, don't write an essay!`
+**Remember:** You're ELO AI - Elite Real Estate Intelligence. Lead with data, inspire with vision, execute with strategy!`
 
     // Generate final response (streaming or regular)
     if (useStreaming) {

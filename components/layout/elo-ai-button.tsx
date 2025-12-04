@@ -1,17 +1,32 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Brain } from "lucide-react"
 import { AiCoachSlideout } from "@/components/ai-coach/ai-coach-slideout"
 import { BusinessContext } from "@/lib/ai-coach/context-builder"
 import { useUser } from "@clerk/nextjs"
-import { useEffect } from "react"
 
 export function EloAiButton() {
   const [isOpen, setIsOpen] = useState(false)
   const [context, setContext] = useState<BusinessContext | null>(null)
   const { user } = useUser()
+  const pathname = usePathname()
+
+  // Detect page context from pathname
+  const getPageContext = (path: string): string | null => {
+    if (path.includes("/dashboard")) return "dashboard"
+    if (path.includes("/properties")) return "properties"
+    if (path.includes("/agency")) return "agency"
+    if (path.includes("/business")) return "business"
+    if (path.includes("/campaigns")) return "campaigns"
+    if (path.includes("/websites")) return "websites"
+    if (path.includes("/subscriptions")) return "subscriptions"
+    return null
+  }
+
+  const pageContext = getPageContext(pathname || "")
 
   useEffect(() => {
     if (user) {
@@ -46,6 +61,7 @@ export function EloAiButton() {
         onClose={() => setIsOpen(false)}
         title="ELO AI"
         icon={Brain}
+        pageContext={pageContext || undefined}
       />
     </>
   )

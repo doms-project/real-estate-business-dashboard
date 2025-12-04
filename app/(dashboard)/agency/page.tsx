@@ -285,6 +285,12 @@ export default function AgencyPage() {
       {context && (
         <AiCoachSlideout
           context={context}
+          pageContext="agency"
+          pageData={{
+            clients: clients,
+            totalClients: clients.length,
+            activeClients: clients.filter(c => c.status === "Active").length,
+          }}
           quickActions={[
             { label: "Analyze clients", message: "Analyze my agency clients. Which ones are performing best and where can I improve?" },
             { label: "Client strategy", message: "Give me a strategy to grow my agency client base and improve retention." },

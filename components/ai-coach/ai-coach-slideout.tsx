@@ -19,9 +19,21 @@ interface AiCoachSlideoutProps {
   onOpenChange?: (open: boolean) => void
   title?: string
   icon?: React.ComponentType<{ className?: string }>
+  pageContext?: string // e.g., "dashboard", "properties", "agency", "business"
+  pageData?: Record<string, any> // Specific data visible on the current page
 }
 
-export function AiCoachSlideout({ context, quickActions, onClose, isOpen: externalIsOpen, onOpenChange, title = "AI Coach", icon: Icon = Sparkles }: AiCoachSlideoutProps) {
+export function AiCoachSlideout({ 
+  context, 
+  quickActions, 
+  onClose, 
+  isOpen: externalIsOpen, 
+  onOpenChange, 
+  title = "AI Coach", 
+  icon: Icon = Sparkles,
+  pageContext,
+  pageData
+}: AiCoachSlideoutProps) {
   const [internalIsOpen, setInternalIsOpen] = useState(false)
   const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen
   
@@ -74,7 +86,12 @@ export function AiCoachSlideout({ context, quickActions, onClose, isOpen: extern
 
           {/* Chat Panel */}
           <div className="flex-1 overflow-hidden">
-            <AiCoachPanel initialContext={context} quickActions={quickActions} />
+            <AiCoachPanel 
+              initialContext={context} 
+              quickActions={quickActions}
+              pageContext={pageContext}
+              pageData={pageData}
+            />
           </div>
         </div>
       </div>

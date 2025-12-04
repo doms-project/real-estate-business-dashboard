@@ -124,7 +124,10 @@ export default async function AiCoachPage() {
       </div>
 
       <Card className="h-[calc(100vh-280px)]">
-        <AiCoachPanel initialContext={context} />
+        <AiCoachPanel 
+          initialContext={context}
+          pageContext="ai-coach"
+        />
       </Card>
     </div>
   )

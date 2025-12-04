@@ -28,7 +28,12 @@ const DEFAULT_QUICK_ACTIONS = [
   { label: "Client summary", message: "Summarize performance across all my clients. Highlight top performers and areas for improvement." },
 ]
 
-export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTIONS }: AiCoachPanelProps) {
+export function AiCoachPanel({ 
+  initialContext, 
+  quickActions = DEFAULT_QUICK_ACTIONS,
+  pageContext,
+  pageData 
+}: AiCoachPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -75,6 +80,8 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
         body: JSON.stringify({
           message: messageText,
           stream: true, // Enable streaming
+          pageContext: pageContext || null,
+          pageData: pageData || null,
         }),
       })
 

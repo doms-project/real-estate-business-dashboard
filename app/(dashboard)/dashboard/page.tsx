@@ -255,7 +255,18 @@ export default function DashboardPage() {
       </div>
 
       {/* AI Coach Slideout */}
-      {context && <AiCoachSlideout context={context} />}
+      {context && (
+        <AiCoachSlideout 
+          context={context} 
+          pageContext="dashboard"
+          quickActions={[
+            { label: "Analyze dashboard", message: "Analyze my overall dashboard performance. What's working and what needs attention?" },
+            { label: "7-day growth plan", message: "Give me a 7-day action plan to grow my business." },
+            { label: "Focus today", message: "What should I focus on today to move my business forward?" },
+            { label: "Portfolio summary", message: "Summarize my entire portfolio. Highlight top performers and biggest opportunities." },
+          ]}
+        />
+      )}
     </div>
   )
 }
