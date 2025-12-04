@@ -161,6 +161,7 @@ export interface Database {
           type: string
           status: 'rented' | 'vacant' | 'under_maintenance' | 'sold'
           mortgage_holder: string | null
+          total_mortgage_amount: number
           purchase_price: number
           current_est_value: number
           monthly_mortgage_payment: number
@@ -181,6 +182,7 @@ export interface Database {
           type: string
           status: 'rented' | 'vacant' | 'under_maintenance' | 'sold'
           mortgage_holder?: string | null
+          total_mortgage_amount?: number
           purchase_price?: number
           current_est_value?: number
           monthly_mortgage_payment?: number
@@ -415,6 +417,8 @@ export type WorkRequestRow = Database['public']['Tables']['work_requests']['Row'
 export type AgencyClientRow = Database['public']['Tables']['agency_clients']['Row']
 export type GHLClientRow = Database['public']['Tables']['ghl_clients']['Row']
 export type GHLWeeklyMetricRow = Database['public']['Tables']['ghl_weekly_metrics']['Row']
+
+
 
 
 

@@ -175,6 +175,7 @@ export default function PropertiesPage() {
               type: p.type,
               status: p.status,
               mortgageHolder: p.mortgage_holder,
+              totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
               purchasePrice: parseFloat(p.purchase_price) || 0,
               currentEstValue: parseFloat(p.current_est_value) || 0,
               monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
@@ -436,6 +437,7 @@ export default function PropertiesPage() {
           [
             "purchasePrice",
             "currentEstValue",
+            "totalMortgageAmount",
             "monthlyMortgagePayment",
             "monthlyInsurance",
             "monthlyPropertyTax",
@@ -536,6 +538,7 @@ export default function PropertiesPage() {
                 type: p.type,
                 status: p.status,
                 mortgageHolder: p.mortgage_holder,
+                totalMortgageAmount: parseFloat(p.total_mortgage_amount) || 0,
                 purchasePrice: parseFloat(p.purchase_price) || 0,
                 currentEstValue: parseFloat(p.current_est_value) || 0,
                 monthlyMortgagePayment: parseFloat(p.monthly_mortgage_payment) || 0,
@@ -653,9 +656,10 @@ export default function PropertiesPage() {
                 handleCellCancel()
               }
             }}
-            className="h-8 w-32"
+            className={`h-8 ${field === "mortgageHolder" || field === "address" ? "w-48" : "w-32"}`}
             autoFocus
             type={typeof rawValue === "number" ? "number" : "text"}
+            placeholder={field === "mortgageHolder" ? "Enter mortgage holder name" : ""}
           />
           <Button
             variant="ghost"
@@ -683,7 +687,7 @@ export default function PropertiesPage() {
         onClick={() => handleCellClick(propertyId, field, displayValue, rawValue)}
         title="Click to edit"
       >
-        {displayValue}
+        {displayValue || (field === "mortgageHolder" ? "Click to add" : "")}
       </span>
     )
   }
@@ -695,6 +699,7 @@ export default function PropertiesPage() {
       "Type",
       "Status",
       "Mortgage Holder",
+      "Total Mortgage Amount",
       "Purchase Price",
       "Current Est. Value",
       "Monthly Mortgage Payment",
@@ -709,6 +714,7 @@ export default function PropertiesPage() {
       p.type,
       p.status,
       p.mortgageHolder || "",
+      (p.totalMortgageAmount || 0).toString(),
       p.purchasePrice.toString(),
       p.currentEstValue.toString(),
       p.monthlyMortgagePayment.toString(),
@@ -752,6 +758,7 @@ export default function PropertiesPage() {
       "Type",
       "Status",
       "Mortgage Holder",
+      "Total Mortgage Amount",
       "Purchase Price",
       "Current Est. Value",
       "Monthly Mortgage Payment",
@@ -767,6 +774,7 @@ export default function PropertiesPage() {
         "House",
         "rented",
         "Sample Bank",
+        "400000",
         "500000",
         "550000",
         "2500",
@@ -1028,6 +1036,7 @@ export default function PropertiesPage() {
     { value: "type", label: "Type" },
     { value: "status", label: "Status" },
     { value: "mortgageHolder", label: "Mortgage Holder" },
+    { value: "totalMortgageAmount", label: "Total Mortgage Amount" },
     { value: "purchasePrice", label: "Purchase Price" },
     { value: "currentEstValue", label: "Current Est. Value" },
     { value: "monthlyMortgagePayment", label: "Monthly Mortgage Payment" },
@@ -1078,18 +1087,15 @@ export default function PropertiesPage() {
             <Download className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
-          <Button variant="outline" onClick={exportToJSON}>
-            <FileText className="mr-2 h-4 w-4" />
-            Export JSON
-          </Button>
         <Button
           onClick={() => {
             // Add a new property with default values (all required fields filled)
             const newProperty: Property = {
               id: `temp-${Date.now()}`, // Temporary ID until saved
-              address: 'New Property', // Default address so it can be saved
-              type: 'residential', // Default type so it can be saved
+              address: '', // Empty address - user will fill it in
+              type: '', // Empty type - user will fill it in
               status: 'vacant', // Valid status
+              totalMortgageAmount: 0,
               purchasePrice: 0,
               currentEstValue: 0,
               monthlyMortgagePayment: 0,
@@ -1101,6 +1107,10 @@ export default function PropertiesPage() {
               workRequests: [],
             }
             setProperties([...properties, newProperty])
+            // Focus on the address field of the new row after a short delay
+            setTimeout(() => {
+              handleCellClick(newProperty.id, "address", "", "")
+            }, 100)
           }}
         >
           <Plus className="mr-2 h-4 w-4" />
@@ -1150,6 +1160,8 @@ export default function PropertiesPage() {
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
+              <TableHead>Mortgage Holder</TableHead>
+              <TableHead className="text-right">Total Mortgage</TableHead>
               <TableHead>Partners</TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 text-right"
@@ -1198,6 +1210,7 @@ export default function PropertiesPage() {
                 </div>
               </TableHead>
               <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="w-12"></TableHead>
               <TableHead className="w-12"></TableHead>
             </TableRow>
           </TableHeader>
@@ -1250,6 +1263,25 @@ export default function PropertiesPage() {
                       >
                         {property.status.replace("_", " ")}
                       </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {renderEditableCell(
+                      property.id,
+                      "mortgageHolder",
+                      property.mortgageHolder || "Click to add",
+                      property.mortgageHolder || "",
+                      true,
+                      property.mortgageHolder ? "" : "text-muted-foreground italic"
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderEditableCell(
+                      property.id,
+                      "totalMortgageAmount",
+                      formatCurrency(property.totalMortgageAmount || 0),
+                      property.totalMortgageAmount || 0,
+                      true
                     )}
                   </TableCell>
                   <TableCell>
@@ -1375,13 +1407,50 @@ export default function PropertiesPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        // Add a new property right after this one
+                        const currentIndex = properties.findIndex(p => p.id === property.id)
+                        const newProperty: Property = {
+                          id: `temp-${Date.now()}`,
+                          address: '',
+                          type: '',
+                          status: 'vacant',
+                          totalMortgageAmount: 0,
+                          purchasePrice: 0,
+                          currentEstValue: 0,
+                          monthlyMortgagePayment: 0,
+                          monthlyInsurance: 0,
+                          monthlyPropertyTax: 0,
+                          monthlyOtherCosts: 0,
+                          monthlyGrossRent: 0,
+                          rentRoll: [],
+                          workRequests: [],
+                        }
+                        const newProperties = [...properties]
+                        newProperties.splice(currentIndex + 1, 0, newProperty)
+                        setProperties(newProperties)
+                        // Focus on the address field of the new row
+                        setTimeout(() => {
+                          handleCellClick(newProperty.id, "address", "", "")
+                        }, 100)
+                      }}
+                      className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20"
+                      title="Add property row"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
               )
             })}
           </TableBody>
           <TableFooter>
             <TableRow className="font-bold bg-muted/50">
-              <TableCell colSpan={3}>Portfolio Totals</TableCell>
+              <TableCell colSpan={5}>Portfolio Totals</TableCell>
               <TableCell className="text-right">
                 {portfolioTotals.totalProperties} Properties
               </TableCell>
@@ -1399,6 +1468,7 @@ export default function PropertiesPage() {
               >
                 {formatCurrency(portfolioTotals.totalMonthlyCashflow)}
               </TableCell>
+              <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>

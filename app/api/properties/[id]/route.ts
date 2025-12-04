@@ -36,6 +36,7 @@ export async function PUT(
         type: body.type,
         status: body.status,
         mortgage_holder: body.mortgageHolder || null,
+        total_mortgage_amount: body.totalMortgageAmount || 0,
         purchase_price: body.purchasePrice || 0,
         current_est_value: body.currentEstValue || 0,
         monthly_mortgage_payment: body.monthlyMortgagePayment || 0,

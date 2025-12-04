@@ -59,6 +59,7 @@ export interface Property {
   status: "rented" | "vacant" | "under_maintenance" | "sold"
   // Financial fields
   mortgageHolder?: string
+  totalMortgageAmount?: number
   purchasePrice: number
   currentEstValue: number
   monthlyMortgagePayment: number
