@@ -239,45 +239,46 @@ export default function AgencyPage() {
       <div>
         <h2 className="text-2xl font-bold tracking-tight mb-4">Agency Clients</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {clients.map((client) => (
-          <Card key={client.id}>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <CardTitle className="flex items-center gap-2">
-                    <Building2 className="h-5 w-5" />
-                    {client.name}
-                  </CardTitle>
-                  <CardDescription className="mt-2">
-                    {client.status}
-                  </CardDescription>
+          {clients.map((client) => (
+            <Card key={client.id}>
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <CardTitle className="flex items-center gap-2">
+                      <Building2 className="h-5 w-5" />
+                      {client.name}
+                    </CardTitle>
+                    <CardDescription className="mt-2">
+                      {client.status}
+                    </CardDescription>
+                  </div>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1">
-                    <Users className="h-4 w-4" />
-                    Contacts
-                  </span>
-                  <span className="text-sm font-semibold">{client.contacts}</span>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <Users className="h-4 w-4" />
+                      Contacts
+                    </span>
+                    <span className="text-sm font-semibold">{client.contacts}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <LinkIcon className="h-4 w-4" />
+                      Websites
+                    </span>
+                    <span className="text-sm font-semibold">{client.websites}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Tasks</span>
+                    <span className="text-sm font-semibold">{client.tasks}</span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1">
-                    <LinkIcon className="h-4 w-4" />
-                    Websites
-                  </span>
-                  <span className="text-sm font-semibold">{client.websites}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Tasks</span>
-                  <span className="text-sm font-semibold">{client.tasks}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       {/* AI Coach Slideout */}
