@@ -19,6 +19,8 @@ interface AiCoachPanelProps {
     label: string
     message: string
   }>
+  pageContext?: string // e.g., "dashboard", "properties", "agency", "business"
+  pageData?: Record<string, any> // Specific data visible on the current page
 }
 
 const DEFAULT_QUICK_ACTIONS = [
