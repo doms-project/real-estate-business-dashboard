@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getOrCreateUserWorkspace, getUserWorkspaces } from '@/lib/workspace-helpers'
+import { activityTracker } from '@/lib/activity-tracker'
 
 /**
  * GET /api/blops - Fetch workspace blops
@@ -98,7 +99,14 @@ export async function POST(request: NextRequest) {
 
     if (deleteError) {
       console.error('Error deleting existing blops:', deleteError)
-      // Continue anyway - might be first time saving
+      return NextResponse.json(
+        {
+          error: 'Failed to delete existing blops before saving',
+          details: `Delete operation failed: ${deleteError.message}. This prevents data duplication. Please try again.`,
+          code: 'DELETE_FAILED'
+        },
+        { status: 500 }
+      )
     }
 
     // Insert new blops
@@ -128,10 +136,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    // Log activity for new blops
+    data.forEach((blop: any) => {
+      activityTracker.logBlopCreated(userId, blop.content || 'Untitled Blop', targetWorkspaceId)
+    })
+
+    return NextResponse.json({
+      success: true,
       blops: data,
-      message: `Saved ${data.length} blops` 
+      message: `Saved ${data.length} blops`
     })
   } catch (error: any) {
     console.error('Error in POST /api/blops:', error)

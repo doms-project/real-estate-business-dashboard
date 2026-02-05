@@ -3,6 +3,9 @@
 import { Sidebar } from "@/components/layout/sidebar"
 import { InvitationPrompt } from "@/components/team/invitation-prompt"
 import { EloAiButton } from "@/components/layout/elo-ai-button"
+import { PageDataProvider } from "@/components/layout/page-data-context"
+import { SystemInitializer } from "@/components/system-initializer"
+import { WorkspaceProvider } from "@/components/workspace-context"
 import { useUser } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
@@ -28,9 +31,13 @@ export default function DashboardLayout({
     return () => clearTimeout(timer)
   }, [isLoaded])
 
+  // Authentication redirect - disabled in development for easier testing
+  // Set DISABLE_AUTH_REDIRECT=true in .env.local to disable this check
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      router.push("/sign-in")
+    if (process.env.NODE_ENV === 'production' || !process.env.DISABLE_AUTH_REDIRECT) {
+      if (isLoaded && !isSignedIn) {
+        router.push("/sign-in")
+      }
     }
   }, [isLoaded, isSignedIn, router])
 
@@ -71,32 +78,39 @@ export default function DashboardLayout({
     )
   }
 
-  if (!isSignedIn) {
+  // Authentication check - disabled in development for easier testing
+  // Set DISABLE_AUTH_REDIRECT=true in .env.local to disable this check
+  if ((process.env.NODE_ENV === 'production' || !process.env.DISABLE_AUTH_REDIRECT) && !isSignedIn) {
     return null
   }
 
   return (
-    <div className="flex h-screen relative">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onOpen={() => setSidebarOpen(true)} />
-      
-      <main className="flex-1 overflow-auto w-full lg:w-auto">
-        {children}
-      </main>
-      
-      {/* ELO AI Button - appears on every page */}
-      <EloAiButton />
-      
-      {/* Invitation Prompt - shows when user has pending invitations */}
-      <InvitationPrompt />
-    </div>
+    <PageDataProvider>
+      <WorkspaceProvider>
+        <SystemInitializer />
+        <div className="flex h-screen relative">
+          {/* Mobile overlay */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+
+          <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} onOpen={() => setSidebarOpen(true)} />
+
+          <main className="flex-1 overflow-auto w-full lg:w-auto">
+            {children}
+          </main>
+
+          {/* ELO AI Button - appears on every page */}
+          <EloAiButton />
+
+          {/* Invitation Prompt - shows when user has pending invitations */}
+          <InvitationPrompt />
+        </div>
+      </WorkspaceProvider>
+    </PageDataProvider>
   )
 }
 

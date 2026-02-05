@@ -407,6 +407,50 @@ export interface Database {
           created_at?: string
         }
       }
+      ghl_locations: {
+        Row: {
+          id: string
+          name: string
+          city: string | null
+          state: string | null
+          country: string
+          address: string | null
+          pit_token: string
+          description: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id: string
+          name: string
+          city?: string | null
+          state?: string | null
+          country?: string
+          address?: string | null
+          pit_token: string
+          description?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          city?: string | null
+          state?: string | null
+          country?: string
+          address?: string | null
+          pit_token?: string
+          description?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+        }
+      }
     }
   }
 }
@@ -421,6 +465,7 @@ export type WorkRequestRow = Database['public']['Tables']['work_requests']['Row'
 export type AgencyClientRow = Database['public']['Tables']['agency_clients']['Row']
 export type GHLClientRow = Database['public']['Tables']['ghl_clients']['Row']
 export type GHLWeeklyMetricRow = Database['public']['Tables']['ghl_weekly_metrics']['Row']
+export type GHLLocationRow = Database['public']['Tables']['ghl_locations']['Row']
 
 
 

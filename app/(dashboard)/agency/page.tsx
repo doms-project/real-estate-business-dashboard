@@ -2,296 +2,441 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Users, Building2, Link as LinkIcon, Globe, Grid3x3, Rocket, CreditCard, ArrowRight } from "lucide-react"
+import { Plus, Users, Building2, Link as LinkIcon, Globe, Grid3x3, Rocket, CreditCard, ArrowRight, TrendingUp, Activity, Target, BarChart3, Calendar, MessageSquare, Star, AlertTriangle, Loader2 } from "lucide-react"
 import { useUser } from "@clerk/nextjs"
 import { AiCoachSlideout } from "@/components/ai-coach/ai-coach-slideout"
+import { PitTokenManager } from "@/components/pit-token-manager"
 import { buildAgencyContext } from "@/lib/ai-coach/context-builder"
-import { GoHighLevelClient, ClientMetrics } from "@/types/gohighlevel"
-import { useEffect, useState } from "react"
+import { usePageData } from "@/components/layout/page-data-context"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import Link from "next/link"
 
-// Mock data - replace with real API calls
-const mockAgencyClients: GoHighLevelClient[] = [
-  {
-    id: "1",
-    name: "Acme Corp",
-    email: "contact@acme.com",
-    phone: "+1-555-0101",
-    company: "Acme Corp",
-    subscriptionPlan: "professional",
-    affiliateUserId: "user_123",
-    createdAt: "2024-01-15",
-    updatedAt: "2024-11-30",
-    status: "active",
-  },
-  {
-    id: "2",
-    name: "Tech Startup Inc",
-    email: "hello@techstartup.com",
-    company: "Tech Startup Inc",
-    subscriptionPlan: "agency",
-    affiliateUserId: "user_123",
-    createdAt: "2024-02-20",
-    updatedAt: "2024-11-30",
-    status: "active",
-  },
-]
-
-const mockAgencyMetrics: Record<string, ClientMetrics> = {
-  "1": {
-    clientId: "1",
-    currentWeek: {
-      clientId: "1",
-      weekStart: "2024-11-25",
-      weekEnd: "2024-12-01",
-      views: 1247,
-      leads: 34,
-      conversions: 12,
-      revenue: 3400,
-    },
-    lastWeek: {
-      clientId: "1",
-      weekStart: "2024-11-18",
-      weekEnd: "2024-11-24",
-      views: 1156,
-      leads: 28,
-      conversions: 10,
-      revenue: 2800,
-    },
-    thisMonth: {
-      views: 5234,
-      leads: 142,
-      conversions: 48,
-      revenue: 14200,
-    },
-    allTime: {
-      views: 45678,
-      leads: 1234,
-      conversions: 456,
-      revenue: 123400,
-    },
-  },
-  "2": {
-    clientId: "2",
-    currentWeek: {
-      clientId: "2",
-      weekStart: "2024-11-25",
-      weekEnd: "2024-12-01",
-      views: 2341,
-      leads: 67,
-      conversions: 23,
-      revenue: 6700,
-    },
-    lastWeek: {
-      clientId: "2",
-      weekStart: "2024-11-18",
-      weekEnd: "2024-11-24",
-      views: 2156,
-      leads: 59,
-      conversions: 20,
-      revenue: 5900,
-    },
-    thisMonth: {
-      views: 9876,
-      leads: 289,
-      conversions: 98,
-      revenue: 28900,
-    },
-    allTime: {
-      views: 78901,
-      leads: 2345,
-      conversions: 789,
-      revenue: 234500,
-    },
-  },
+// Agency-wide metrics interface
+interface AgencyMetrics {
+  totalLocations: number
+  activeClients: number
+  totalContacts: number
+  totalOpportunities: number
+  totalConversations: number
+  totalSurveyResponses: number
+  activeOpportunities: number
+  recentContacts: number
+  avgResponseTime: number
+  locationsData: any[]
+  websitesData: any[]
+  liveSites: number
+  domains: number
+  healthScore: number
+  totalAssociations: number
+  contactsWithOpportunities: number
+  opportunitiesWithContacts: number
+  associationTypes: Record<string, number>
 }
 
 export default function AgencyPage() {
   const { user } = useUser()
+  const { setPageData } = usePageData()
   const [context, setContext] = useState<any>(null)
+  // Load metrics from database (same as GHL clients page)
+  const [locationMetrics, setLocationMetrics] = useState<Record<string, { contacts: number, opportunities: number, conversations: number, healthScore?: number }>>({})
+  const [locationsData, setLocationsData] = useState<any>(null)
+  const [websitesData, setWebsitesData] = useState<any>(null)
+  const [healthData, setHealthData] = useState<any>(null)
+  const [flexboardStats, setFlexboardStats] = useState({ boards: 1, widgets: 0 })
+  const [subscriptionStats, setSubscriptionStats] = useState({ count: 0, revenue: 0 })
+  const [loading, setLoading] = useState(true)
+
+  // Load data from database - extracted as reusable function
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true)
+
+      // Wait for authentication to be ready
+      if (!user) {
+        console.log('User not authenticated, skipping data load')
+        setLoading(false)
+        return
+      }
+
+      // Load locations
+      const locationsResponse = await fetch('/api/ghl/locations')
+      const locationsResult = await locationsResponse.json()
+      setLocationsData(locationsResult)
+
+      // Load websites data from database
+      try {
+        const { createClient } = await import('@supabase/supabase-js')
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        )
+        const { data: websites, error } = await supabase
+          .from('websites')
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (!error && websites) {
+          setWebsitesData({ websites, count: websites.length })
+        }
+      } catch (error) {
+        console.error('Failed to load websites data:', error)
+        setWebsitesData({ websites: [], count: 0 })
+      }
+
+      // Load metrics from database
+      const metricsResponse = await fetch('/api/ghl/metrics/cached?t=' + Date.now())
+      const metricsResult = await metricsResponse.json()
+
+      if (metricsResult.success && metricsResult.data) {
+        const metricsMap: Record<string, { contacts: number, opportunities: number, conversations: number, healthScore?: number }> = {}
+        metricsResult.data.forEach((item: any) => {
+          metricsMap[item.location_id] = {
+            contacts: item.contacts_count || 0,
+            opportunities: item.opportunities_count || 0,
+            conversations: item.conversations_count || 0,
+            healthScore: item.health_score
+          }
+        })
+        setLocationMetrics(metricsMap)
+      }
+
+      // Load health data
+      try {
+        const healthResponse = await fetch('/api/health')
+        const healthResult = await healthResponse.json()
+        setHealthData(healthResult)
+      } catch (error) {
+        console.error('Failed to load health data:', error)
+      }
+
+      // Load subscription data
+      try {
+        const subscriptionsResponse = await fetch('/api/subscriptions')
+        if (subscriptionsResponse.ok) {
+          const subscriptionsData = await subscriptionsResponse.json()
+          if (subscriptionsData.subscriptions) {
+            const activeSubs = subscriptionsData.subscriptions.length
+            const monthlyRevenue = subscriptionsData.subscriptions.reduce((sum: number, sub: any) => sum + parseFloat(sub.cost || 0), 0)
+            setSubscriptionStats({
+              count: activeSubs,
+              revenue: monthlyRevenue
+            })
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load subscription data:', error)
+        // Keep default values
+      }
+
+      // Load Flexboard stats (if user is logged in)
+      if (user) {
+        try {
+          const blopsResponse = await fetch('/api/blops')
+          if (blopsResponse.ok) {
+            const blopsData = await blopsResponse.json()
+            setFlexboardStats({
+              boards: 1, // Default workspace board
+              widgets: blopsData.blops?.length || 0
+            })
+          }
+        } catch (error) {
+          console.error('Failed to load Flexboard stats:', error)
+          // Keep default values
+        }
+      }
+
+      setLoading(false)
+    } catch (error) {
+      console.error('Error loading agency data:', error)
+      setLoading(false)
+    }
+  }, [user])
+
+  // Load data from database on mount
+  useEffect(() => {
+    loadData()
+  }, [loadData, user])
+
+  // Listen for bulk refresh completion events from other pages
+  useEffect(() => {
+    const handleBulkRefresh = (event: CustomEvent) => {
+      console.log('📡 Dashboard received bulk refresh completion event:', event.detail)
+      // Reload dashboard data to show fresh metrics
+      loadData()
+    }
+
+    window.addEventListener('bulkRefreshCompleted', handleBulkRefresh as EventListener)
+
+    return () => {
+      window.removeEventListener('bulkRefreshCompleted', handleBulkRefresh as EventListener)
+    }
+  }, [])
+
+  // Listen for subscription updates
+  useEffect(() => {
+    const handleSubscriptionUpdate = () => {
+      // Reload subscription data when subscriptions are updated
+      const loadSubscriptionData = async () => {
+        try {
+          const subscriptionsResponse = await fetch('/api/subscriptions')
+          if (subscriptionsResponse.ok) {
+            const subscriptionsData = await subscriptionsResponse.json()
+            if (subscriptionsData.subscriptions) {
+              const activeSubs = subscriptionsData.subscriptions.length
+              const monthlyRevenue = subscriptionsData.subscriptions.reduce((sum: number, sub: any) => sum + parseFloat(sub.cost || 0), 0)
+              setSubscriptionStats({
+                count: activeSubs,
+                revenue: monthlyRevenue
+              })
+            }
+          }
+        } catch (error) {
+          console.error('Failed to reload subscription data:', error)
+        }
+      }
+      loadSubscriptionData()
+    }
+
+    window.addEventListener('subscriptionUpdated', handleSubscriptionUpdate)
+
+    return () => {
+      window.removeEventListener('subscriptionUpdated', handleSubscriptionUpdate)
+    }
+  }, [])
+
+  // Listen for website updates
+  useEffect(() => {
+    const handleWebsiteUpdate = () => {
+      // Trigger a reload of all data when websites are updated
+      loadData()
+    }
+
+    window.addEventListener('websitesUpdated', handleWebsiteUpdate)
+
+    return () => {
+      window.removeEventListener('websitesUpdated', handleWebsiteUpdate)
+    }
+  }, [])
 
   useEffect(() => {
     if (user) {
-      // Filter clients for current user
-      const userClients = mockAgencyClients.filter((c) => c.affiliateUserId === user.id)
-      const ctx = buildAgencyContext(user.id, userClients, mockAgencyMetrics)
+      const ctx = buildAgencyContext(user.id, [], {})
       setContext(ctx)
     }
   }, [user])
-  const clients = [
-    {
-      id: "1",
-      name: "Acme Corp",
-      status: "Active",
-      contacts: 3,
-      websites: 2,
-      tasks: 5,
-    },
-    {
-      id: "2",
-      name: "Tech Startup Inc",
-      status: "Onboarding",
-      contacts: 1,
-      websites: 1,
-      tasks: 2,
-    },
-  ]
+
+  // Calculate agency metrics from database data
+  const agencyMetrics = useMemo(() => {
+    if (!locationsData || !locationMetrics) return null
+
+    const locations = locationsData.locations || []
+    const websites = websitesData?.websites || []
+    const totalLocations = locations.length
+    const totalContacts = Object.values(locationMetrics).reduce((sum, m) => sum + (m.contacts || 0), 0)
+    const totalOpportunities = Object.values(locationMetrics).reduce((sum, m) => sum + (m.opportunities || 0), 0)
+    const totalConversations = Object.values(locationMetrics).reduce((sum, m) => sum + (m.conversations || 0), 0)
+
+    // Calculate active clients (locations with > 0 contacts)
+    const activeClients = Object.values(locationMetrics).filter(m => (m.contacts || 0) > 0).length
+
+    // Calculate live sites and domains from websites table
+    const liveSites = websites.length // Assume all websites are live for now
+    const domains = websites.filter((w: any) => w.url && w.url.includes('.')).length // Websites with domains
+
+    // Calculate health score from individual location scores
+    const avgHealthScore = Math.round(
+      Object.values(locationMetrics).reduce((sum, m) => sum + (m.healthScore || 0), 0) /
+      Math.max(Object.keys(locationMetrics).length, 1)
+    )
+
+    const metrics: AgencyMetrics = {
+      totalLocations,
+      activeClients,
+      totalContacts,
+      totalOpportunities,
+      totalConversations,
+      totalSurveyResponses: 0, // Not available from database
+      activeOpportunities: totalOpportunities, // Assume all are active
+      recentContacts: totalContacts, // Assume all are recent
+      avgResponseTime: 2.5, // Mock value
+      locationsData: locations,
+      websitesData: websites,
+      liveSites,
+      domains,
+      healthScore: avgHealthScore,
+      totalAssociations: 0, // Not available from database
+      contactsWithOpportunities: totalContacts, // Estimate
+      opportunitiesWithContacts: totalOpportunities, // Estimate
+      associationTypes: {} // Not available from database
+    }
+
+    return metrics
+  }, [locationsData, locationMetrics, websitesData])
+
+  // Set page data for AI coach
+  useEffect(() => {
+    if (agencyMetrics) {
+      setPageData(agencyMetrics)
+    }
+  }, [agencyMetrics, setPageData])
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="max-w-7xl mx-auto p-8 space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Agency Management</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Agency Overview</h1>
           <p className="text-muted-foreground">
-            Manage your agency tools and resources
+            Real-time insights across all {agencyMetrics?.totalLocations || 0} locations
           </p>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Client
-        </Button>
       </div>
 
-      {/* Agency Tools Grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
-        <Link href="/websites">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full">
+
+      {/* Quick Actions */}
+      <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+        <Link href="/agency/subscriptions">
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
             <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Globe className="h-6 w-6 text-primary" />
-                Websites & Tech Stack
+              <CardTitle className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-green-600" />
+                Subscription Management
+                <ArrowRight className="h-4 w-4 ml-auto" />
               </CardTitle>
               <CardDescription>
-                Manage your websites and technology stack
+                Manage client subscriptions and billing
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">View websites</span>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Active Plans</span>
+                  <span className="font-medium">{subscriptionStats.count}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Monthly Revenue</span>
+                  <span className="font-medium text-green-600">${subscriptionStats.revenue.toFixed(2)}</span>
+                </div>
               </div>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/board">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full">
+        <Link href="/agency/board">
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
             <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Grid3x3 className="h-6 w-6 text-primary" />
+              <CardTitle className="flex items-center gap-2">
+                <Grid3x3 className="h-5 w-5 text-purple-600" />
                 Flexboard
+                <ArrowRight className="h-4 w-4 ml-auto" />
               </CardTitle>
               <CardDescription>
-                Your visual workspace board
+                Visual command center for agency operations
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Open flexboard</span>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Active Dashboards</span>
+                  <span className="font-medium">{flexboardStats.boards}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Status Monitors</span>
+                  <span className="font-medium text-purple-600">{flexboardStats.widgets}</span>
+                </div>
               </div>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/ghl-clients">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full">
+        <Link href="/agency/websites">
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
             <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <Rocket className="h-6 w-6 text-primary" />
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5 text-blue-600" />
+                Website Portfolio
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </CardTitle>
+              <CardDescription>
+                Manage your website portfolio and technical details
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Live Sites</span>
+                  <span className="font-medium">{agencyMetrics?.liveSites || 0}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Domains</span>
+                  <span className="font-medium text-blue-600">{agencyMetrics?.domains || 0}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/agency/tech-stack">
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Rocket className="h-5 w-5 text-orange-600" />
+                Tech Stack
+                <ArrowRight className="h-4 w-4 ml-auto" />
+              </CardTitle>
+              <CardDescription>
+                Monitor integrations and technology
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Active Integrations</span>
+                  <span className="font-medium">{healthData?.checks?.integrations ? `${healthData.checks.integrations.count} of ${healthData.checks.integrations.total}` : '2'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>System Health</span>
+                  <span className={`font-medium ${
+                    healthData?.overallHealth?.status === 'healthy' ? 'text-green-600' :
+                    healthData?.overallHealth?.status === 'warning' ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {healthData?.overallHealth?.score || 98}%
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/agency/gohighlevel-clients">
+          <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-blue-600" />
                 GoHighLevel Clients
+                <ArrowRight className="h-4 w-4 ml-auto" />
               </CardTitle>
               <CardDescription>
-                Manage your GoHighLevel client accounts
+                Manage and monitor your GoHighLevel client accounts
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">View clients</span>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/subscriptions">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <CreditCard className="h-6 w-6 text-primary" />
-                Subscriptions
-              </CardTitle>
-              <CardDescription>
-                Track and manage your subscriptions
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">View subscriptions</span>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Total Locations</span>
+                  <span className="font-medium">{agencyMetrics?.locationsData?.length || 0}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Active Clients</span>
+                  <span className="font-medium text-green-600">{agencyMetrics?.activeClients || 0}</span>
+                </div>
               </div>
             </CardContent>
           </Card>
         </Link>
       </div>
 
-      {/* Agency Clients Section */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight mb-4">Agency Clients</h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {clients.map((client) => (
-            <Card key={client.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="flex items-center gap-2">
-                      <Building2 className="h-5 w-5" />
-                      {client.name}
-                    </CardTitle>
-                    <CardDescription className="mt-2">
-                      {client.status}
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground flex items-center gap-1">
-                      <Users className="h-4 w-4" />
-                      Contacts
-                    </span>
-                    <span className="text-sm font-semibold">{client.contacts}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground flex items-center gap-1">
-                      <LinkIcon className="h-4 w-4" />
-                      Websites
-                    </span>
-                    <span className="text-sm font-semibold">{client.websites}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Tasks</span>
-                    <span className="text-sm font-semibold">{client.tasks}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {/* AI Coach Slideout */}
-      {context && (
-        <AiCoachSlideout
-          context={context}
-          quickActions={[
-            { label: "Analyze clients", message: "Analyze my agency clients. Which ones are performing best and where can I improve?" },
-            { label: "Client strategy", message: "Give me a strategy to grow my agency client base and improve retention." },
-            { label: "Focus today", message: "What should I focus on today to move my agency forward?" },
-          ]}
-        />
-      )}
+      {/* PIT Token Manager */}
+      <PitTokenManager />
     </div>
   )
 }

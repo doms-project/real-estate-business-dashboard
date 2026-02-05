@@ -40,8 +40,8 @@ export interface WeeklyMetrics {
 
 export interface ClientMetrics {
   clientId: string
-  currentWeek: WeeklyMetrics
-  lastWeek: WeeklyMetrics
+  currentWeek?: WeeklyMetrics
+  lastWeek?: WeeklyMetrics
   thisMonth: {
     views: number
     leads: number

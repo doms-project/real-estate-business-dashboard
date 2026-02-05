@@ -1,0 +1,124 @@
+[
+  {
+    "id": "be4yGETqzGQ4sknbwXb3",
+    "name": "Youngstown Marketing Company",
+    "city": "Canfield",
+    "state": "OH",
+    "country": "US",
+    "address": "110 Russo Drive",
+    "pitToken": "pit-18fcee5b-5b0c-48d1-84f6-f2f780f63ae6",
+    "description": "Youngstown Marketing Company"
+  },
+  {
+    "id": "LmFMkp4XCICQyJxZ2NmP",
+    "name": "The Mahoning Home Buyer",
+    "city": "Youngstown",
+    "state": "OH",
+    "country": "US",
+    "address": "Youngstown, OH",
+    "pitToken": "pit-82788f45-c141-4ca4-8e8f-7c634e165a9a",
+    "description": "The Mahoning Home Buyer"
+  },
+  {
+    "id": "agOqs57EjbySX8vgOgAB",
+    "name": "Alternabiz LLC",
+    "city": "New York",
+    "state": "NY",
+    "country": "US",
+    "address": "167 Madison Avenue #205 New York NY 10016",
+    "pitToken": "pit-379e3f5b-0b5e-4808-8a61-3903180bd5f6",
+    "description": "Alternabiz LLC"
+  },
+  {
+    "id": "QmT69Y7kvxxol1tU8f7z",
+    "name": "Amazing GraceHomeCare",
+    "city": "Cleveland",
+    "state": "OH",
+    "country": "US",
+    "address": "Cleveland",
+    "pitToken": "pit-acecb092-1b17-4437-877d-df53d7a70d70",
+    "description": "Amazing GraceHomeCare"
+  },
+  {
+    "id": "qlkgwbwhyFnZJseaznt5",
+    "name": "ARS CONTRACTING",
+    "city": "Cleveland",
+    "state": "OH",
+    "country": "US",
+    "address": "Cleveland",
+    "pitToken": "pit-b853680d-f4b2-43ca-9878-18fc78d0d374",
+    "description": "ARS CONTRACTING"
+  },
+  {
+    "id": "ikoKs7PXleHTNsAYtajZ",
+    "name": "ATV'S Tulum",
+    "city": "Waterford",
+    "state": "NY",
+    "country": "US",
+    "address": "141 Davis Ave",
+    "pitToken": "pit-1f7fabb8-1119-461d-a349-58fdb177c89e",
+    "description": "ATV'S Tulum"
+  },
+  {
+    "id": "fl6qZvSghEoV572mIyOM",
+    "name": "Bernies Power & Soft",
+    "city": "Youngstown",
+    "state": "OH",
+    "country": "US",
+    "address": "Youngstown, OH",
+    "pitToken": "pit-f858b21a-8681-494a-a058-06b6230d6bc3",
+    "description": "Bernies Power & Soft"
+  },
+  {
+    "id": "7Cy0DMyQtZncgY3hOarV",
+    "name": "Beth Buys Homes",
+    "city": "Youngstown",
+    "state": "OH",
+    "country": "US",
+    "address": "Youngstown, OH",
+    "pitToken": "pit-158cd382-eab3-4bf9-82ad-63cfe86eede5",
+    "description": "Beth Buys Homes"
+  },
+  {
+    "id": "FCX448dRtUj0VWMzPWT0",
+    "name": "Blake Buys Homes",
+    "city": "Youngstown",
+    "state": "OH",
+    "country": "US",
+    "address": "Youngstown, OH",
+    "pitToken": "pit-664e35bf-18ce-4286-9e09-118e41fb402d",
+    "description": "Blake Buys Homes"
+  },
+  {
+    "id": "zsoH6zAUB6YKSWCiUDjN",
+    "name": "Bloom Wealth Partners",
+    "city": "Youngstown",
+    "state": "OH",
+    "country": "US",
+    "address": "Youngstown, OH",
+    "pitToken": "pit-a4210e04-cdff-4bc2-9336-ad037c966ad8",
+    "description": "Bloom Wealth Partners"
+  },
+  {
+    "id": "wwWN0QzriyIE8oV1YT7o",
+    "name": "Choppin Throttles",
+    "city": "",
+    "state": "",
+    "country": "US",
+    "address": "Ohio",
+    "pitToken": "pit-6f7ce12e-ef84-4fd2-b873-8be37f2baa19",
+    "description": "Choppin Throttles"
+  },
+  {
+    "id": "1yRAByUvJdxJQHjrxKqL",
+    "name": "Rent A Scooter Tulum",
+    "city": null,
+    "state": null,
+    "country": "US",
+    "address": "141 Davis Avenue",
+    "pit_token": "pit-8a198b02-2043-4a09-9d88-101b747d0dd7",
+    "description": "Rent A Scooter Tulum",
+    "is_active": true,
+    "pitToken": "pit-8a198b02-2043-4a09-9d88-101b747d0dd7"
+  }
+]

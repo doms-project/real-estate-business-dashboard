@@ -6,88 +6,47 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { TeamManagement } from "@/components/team/team-management"
 import { useState, useEffect } from "react"
+import { TeamManagement } from "@/components/team/team-management"
+import { WorkspaceSettings } from "@/components/workspace/workspace-settings"
+import { CreateWorkspaceModal } from "@/components/workspace/create-workspace-modal"
+import { WorkspaceRequestsPanel } from "@/components/workspace/workspace-requests-panel"
+import { MyWorkspaceRequests } from "@/components/workspace/my-workspace-requests"
+import { useWorkspace } from "@/components/workspace-context"
+import { useTheme } from "@/lib/theme-context"
+import { useFlexboard } from "@/lib/flexboard-context"
 
 export default function SettingsPage() {
-  const [theme, setTheme] = useState("light")
-  const [snapToGrid, setSnapToGrid] = useState(false)
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const { currentWorkspace } = useWorkspace()
+  const { theme, setTheme } = useTheme()
+  const { settings: flexboardSettings, updateSettings: updateFlexboardSettings } = useFlexboard()
+  const [canManageRequests, setCanManageRequests] = useState(false)
+  const [loadingPermissions, setLoadingPermissions] = useState(true)
 
-  const loadWorkspace = async () => {
-    try {
-      setError(null)
-      setLoading(true)
-      const response = await fetch('/api/workspace')
-      const data = await response.json().catch(() => ({}))
-      
-      if (response.ok) {
-        if (data.workspace?.id) {
-          setWorkspaceId(data.workspace.id)
-          setError(null)
-        } else {
-          setError('Workspace was created but ID is missing. Please refresh the page.')
-        }
-      } else {
-        const errorMessage = data.details || data.error || 'Failed to load workspace'
-        setError(errorMessage)
-        
-        // Check if it's a table doesn't exist error
-        if (errorMessage.includes('relation') && errorMessage.includes('does not exist')) {
-          setError('Database tables not found. Please run the workspace schema migration in Supabase.')
-        }
-      }
-    } catch (error: any) {
-      console.error('Failed to load workspace:', error)
-      setError(error.message || 'Failed to load workspace')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const createWorkspace = async () => {
-    setCreating(true)
-    setError(null)
-    try {
-      const response = await fetch('/api/workspace', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: 'My Workspace' }),
-      })
-      
-      const data = await response.json().catch(() => ({}))
-      
-      if (response.ok) {
-        if (data.workspace?.id) {
-          setWorkspaceId(data.workspace.id)
-          setError(null)
-          // Reload to show the team management UI
-          setTimeout(() => {
-            window.location.reload()
-          }, 500)
-        } else {
-          setError('Workspace was created but ID is missing. Please refresh the page.')
-        }
-      } else {
-        const errorMessage = data.details || data.error || 'Failed to create workspace'
-        setError(errorMessage)
-      }
-    } catch (error: any) {
-      console.error('Failed to create workspace:', error)
-      setError(error.message || 'Failed to create workspace')
-    } finally {
-      setCreating(false)
-    }
-  }
-
+  // Check if user can manage workspace requests (admins/owners only)
   useEffect(() => {
-    loadWorkspace()
-  }, [])
+    const checkPermissions = async () => {
+      if (!currentWorkspace) {
+        setLoadingPermissions(false)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/user/permissions?workspaceId=${currentWorkspace.id}`)
+        if (response.ok) {
+          const data = await response.json()
+          setCanManageRequests(data.permissions.canManageWorkspaceRequests)
+        }
+      } catch (error) {
+        console.error('Failed to check permissions:', error)
+        setCanManageRequests(false)
+      } finally {
+        setLoadingPermissions(false)
+      }
+    }
+
+    checkPermissions()
+  }, [currentWorkspace])
 
   return (
     <div className="p-8 space-y-8">
@@ -109,71 +68,24 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="team" className="space-y-4">
-          {loading ? (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <div className="text-muted-foreground">Loading team settings...</div>
-              </CardContent>
-            </Card>
-          ) : workspaceId ? (
-            <TeamManagement workspaceId={workspaceId} />
+          {currentWorkspace ? (
+            <>
+              <TeamManagement workspaceId={currentWorkspace.id} />
+              {!loadingPermissions && canManageRequests && <WorkspaceRequestsPanel />}
+              {!loadingPermissions && !canManageRequests && <MyWorkspaceRequests />}
+            </>
           ) : (
             <Card>
               <CardHeader>
                 <CardTitle>Team Management</CardTitle>
                 <CardDescription>
-                  {error || 'Workspace not found'}
+                  No workspace available
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-8 text-center space-y-4">
                 <div className="text-muted-foreground">
-                  {error ? (
-                    <div className="space-y-2">
-                      <p className="font-semibold text-red-600">Error: {error}</p>
-                      {error.includes('relation') || error.includes('does not exist') ? (
-                        <div className="text-sm space-y-2 mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                          <p className="font-semibold text-yellow-900">Database Setup Required:</p>
-                          <ol className="list-decimal list-inside space-y-1 text-yellow-800 text-left">
-                            <li>Go to your Supabase Dashboard → SQL Editor</li>
-                            <li>Open the file: <code className="bg-yellow-100 px-1 rounded">supabase/workspaces-schema.sql</code></li>
-                            <li>Copy and paste the entire SQL script</li>
-                            <li>Click &quot;Run&quot; to execute it</li>
-                            <li>Refresh this page</li>
-                          </ol>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-muted-foreground space-y-2 mt-2">
-                          <p>This might be because:</p>
-                          <ul className="list-disc list-inside space-y-1">
-                            <li>The database might not be set up correctly</li>
-                            <li>The workspace tables might not exist</li>
-                            <li>There might be a connection issue</li>
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p>You don&apos;t have a workspace yet. Create one to start inviting team members.</p>
-                  )}
-                </div>
-                <Button 
-                  onClick={createWorkspace} 
-                  disabled={creating}
-                  className="mt-4"
-                >
-                  {creating ? 'Creating...' : 'Create Workspace'}
-                </Button>
-                <div className="text-xs text-muted-foreground mt-4 pt-4 border-t">
-                  <p className="font-semibold mb-2">How to invite team members:</p>
-                  <ol className="list-decimal list-inside space-y-1 text-left max-w-md mx-auto">
-                    <li>Create a workspace (click button above)</li>
-                    <li>Enter your teammate&apos;s email address</li>
-                    <li>They&apos;ll receive an invitation</li>
-                    <li>When they sign up with that email, they&apos;ll be prompted to join</li>
-                  </ol>
-                  <p className="mt-2 text-left max-w-md mx-auto">
-                    <strong>Note:</strong> Teammates use the same sign-in system (Clerk) - they sign up with their email and password, no separate accounts needed!
-                  </p>
+                  <p>You need to have a workspace to manage team members.</p>
+                  <p>Please select or create a workspace first.</p>
                 </div>
               </CardContent>
             </Card>
@@ -181,6 +93,26 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="general" className="space-y-4">
+          <WorkspaceSettings />
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Workspace Management</CardTitle>
+              <CardDescription>
+                Create and manage your workspaces
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">{currentWorkspace?.name}</p>
+                  <p className="text-sm text-muted-foreground">Current workspace</p>
+                </div>
+                <CreateWorkspaceModal />
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>General Settings</CardTitle>
@@ -196,16 +128,24 @@ export default function SettingsPage() {
                     Receive email updates about your workspace
                   </p>
                 </div>
-                <Switch id="emailNotifications" name="emailNotifications" />
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                    Coming Soon
+                  </span>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label htmlFor="autoSave">Auto-save</Label>
                   <p className="text-sm text-muted-foreground">
-                    Automatically save changes
+                    Automatically save changes (always enabled)
                   </p>
                 </div>
-                <Switch id="autoSave" name="autoSave" defaultChecked />
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                    ✓ Enabled
+                  </span>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -233,7 +173,9 @@ export default function SettingsPage() {
                     <SelectItem value="custom">Custom</SelectItem>
                   </SelectContent>
                 </Select>
-                <input type="hidden" name="theme" value={theme} />
+                <p className="text-xs text-muted-foreground">
+                  Choose your preferred theme. System will follow your OS setting.
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -255,7 +197,12 @@ export default function SettingsPage() {
                     Align blops to grid automatically
                   </p>
                 </div>
-                <Switch id="snapToGrid" name="snapToGrid" checked={snapToGrid} onCheckedChange={setSnapToGrid} />
+                <Switch
+                  id="snapToGrid"
+                  name="snapToGrid"
+                  checked={flexboardSettings.snapToGrid}
+                  onCheckedChange={(checked) => updateFlexboardSettings({ snapToGrid: checked })}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="defaultBlopShape">Default Blop Shape</Label>
@@ -274,7 +221,10 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="boardBackground">Board Background</Label>
-                <Select defaultValue="grid">
+                <Select
+                  value={flexboardSettings.boardBackground}
+                  onValueChange={(value) => updateFlexboardSettings({ boardBackground: value as 'grid' | 'dots' | 'plain' })}
+                >
                   <SelectTrigger id="boardBackground" name="boardBackground">
                     <SelectValue />
                   </SelectTrigger>
@@ -284,7 +234,9 @@ export default function SettingsPage() {
                     <SelectItem value="plain">Plain</SelectItem>
                   </SelectContent>
                 </Select>
-                <input type="hidden" name="boardBackground" value="grid" />
+                <p className="text-xs text-muted-foreground">
+                  Choose the background pattern for the flexboard.
+                </p>
               </div>
             </CardContent>
           </Card>

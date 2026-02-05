@@ -25,6 +25,12 @@ export interface Website {
   subscriptionIds?: string[]
 }
 
+export interface LinkedWebsite {
+  id: string
+  name: string
+  linkedAt: string
+}
+
 export interface Subscription {
   id: string
   name: string
@@ -52,6 +58,14 @@ export interface WorkRequest {
   cost: number
 }
 
+export interface PropertyPhoto {
+  id: string
+  url: string
+  filename: string
+  uploadedAt: string
+  description?: string
+}
+
 export interface Property {
   id: string
   address: string
@@ -67,10 +81,15 @@ export interface Property {
   monthlyPropertyTax: number
   monthlyOtherCosts: number
   monthlyGrossRent: number
+  monthlyTotalCosts?: number // Optional: if set, use this instead of calculating
   // Operational fields
   rentRoll?: RentRollUnit[]
-  workRequests?: WorkRequest[]
-  linkedWebsites?: string[]
+  workRequests?: WorkRequest[] // Legacy field
+  maintenanceRequests?: WorkRequest[] // New field using same type
+  linkedWebsites?: LinkedWebsite[]
+  // Additional details
+  notes?: string
+  photos?: PropertyPhoto[]
   // Partnership/Ownership
   ownership?: "100% ownership" | "50% partner" | "25% partner" | "75% partner" | "33% partner" | "67% partner"
 }

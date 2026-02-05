@@ -1,7 +1,5 @@
 "use client"
 
-"use client"
-
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -30,12 +28,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X, Minus } from "lucide-react"
+import { Plus, ArrowUpDown, Edit, Upload, Download, FileText, Star, AlertCircle, Trash2, Check, X, Minus, BarChart3, TrendingUp, Lightbulb, Building, Wrench, Globe, Save } from "lucide-react"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { SaveButton } from "@/components/ui/save-button"
+import { PortfolioAIInsights } from "@/components/portfolio-ai-insights"
+import { PropertyDetailsModal } from "@/components/property-details-modal"
 import { Property } from "@/types"
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useUser } from "@clerk/nextjs"
 import Link from "next/link"
+import { usePageData } from "@/components/layout/page-data-context"
+import { useWorkspace } from "@/components/workspace-context"
 import {
   PropertyField,
   PropertyFieldMapping,
@@ -142,16 +146,53 @@ const mockProperties: Property[] = [
   },
 ]
 
-type SortField = "address" | "status" | "currentEstValue" | "purchasePrice" | "monthlyGrossRent" | "monthlyCashflow" | "roe"
+type SortField = "address" | "status" | "currentEstValue" | "purchasePrice" | "monthlyGrossRent" | "monthlyCashflow" | "roi"
 type SortDirection = "asc" | "desc"
 
 export default function PropertiesPage() {
   const { user } = useUser()
+  const { setPageData } = usePageData()
+  const { currentWorkspace, workspaceSwitchCount } = useWorkspace()
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [properties, setProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<string>("parts")
+
+  // Modal state
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [defaultModalTab, setDefaultModalTab] = useState<"overview" | "rent-roll" | "maintenance" | "websites">("overview")
+
+  // Share properties data with ELO AI
+  useEffect(() => {
+    if (properties.length > 0) {
+      setPageData({
+        properties: properties.map(p => ({
+          address: p.address,
+          type: p.type,
+          status: p.status,
+          purchasePrice: p.purchasePrice,
+          currentEstValue: p.currentEstValue,
+          monthlyMortgagePayment: p.monthlyMortgagePayment,
+          monthlyInsurance: p.monthlyInsurance,
+          monthlyPropertyTax: p.monthlyPropertyTax,
+          monthlyOtherCosts: p.monthlyOtherCosts,
+          monthlyGrossRent: p.monthlyGrossRent,
+          totalMortgageAmount: p.totalMortgageAmount,
+          mortgageHolder: p.mortgageHolder,
+          monthlyCashFlow: (p.monthlyGrossRent || 0) - (p.monthlyMortgagePayment || 0) - (p.monthlyInsurance || 0) - (p.monthlyPropertyTax || 0) - (p.monthlyOtherCosts || 0),
+        })),
+        totalProperties: properties.length,
+        rentedCount: properties.filter(p => p.status === 'rented').length,
+        vacantCount: properties.filter(p => p.status === 'vacant').length,
+      })
+    }
+    return () => {
+      setPageData(null)
+    }
+  }, [properties, setPageData])
 
   // Load properties from database on mount
   useEffect(() => {
@@ -162,7 +203,13 @@ export default function PropertiesPage() {
       }
 
       try {
-        const response = await fetch('/api/properties')
+        if (!currentWorkspace) {
+          console.warn('No workspace selected, cannot load properties')
+          setLoading(false)
+          return
+        }
+
+        const response = await fetch(`/api/properties?workspaceId=${currentWorkspace.id}`)
         if (response.ok) {
           const data = await response.json()
           console.log('Loaded properties from database:', data.properties?.length || 0)
@@ -186,8 +233,10 @@ export default function PropertiesPage() {
                 monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
                 ownership: p.ownership,
                 linkedWebsites: p.linked_websites || [],
-                rentRoll: [], // TODO: Load from rent_roll_units table
-                workRequests: [], // TODO: Load from work_requests table
+                notes: p.notes || "",
+                photos: p.photos || [],
+                rentRoll: p.rent_roll || [], // Load from rent_roll column
+                maintenanceRequests: p.maintenance_requests || [], // Load from maintenance_requests column
               }
               // Restore custom fields from JSONB column
               if (p.custom_fields && typeof p.custom_fields === 'object') {
@@ -227,7 +276,7 @@ export default function PropertiesPage() {
 
     loadProperties()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user, currentWorkspace, workspaceSwitchCount])
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [csvData, setCsvData] = useState<string[][]>([])
   const [csvHeaders, setCsvHeaders] = useState<string[]>([])
@@ -240,10 +289,133 @@ export default function PropertiesPage() {
   const [addCustomFieldDialogOpen, setAddCustomFieldDialogOpen] = useState(false)
   const [newCustomFieldName, setNewCustomFieldName] = useState("")
   const [newCustomFieldType, setNewCustomFieldType] = useState<'text' | 'number'>('text')
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Calculate monthly total costs
+  // Auto-save state
+  const [savingProperties, setSavingProperties] = useState<Set<string>>(new Set())
+  const [savedProperties, setSavedProperties] = useState<Set<string>>(new Set())
+  const [saveErrors, setSaveErrors] = useState<Map<string, string>>(new Map())
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const autoSaveTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map())
+
+  // Auto-save individual property
+  const autoSaveProperty = async (property: Property) => {
+    const propertyId = property.id
+
+    // Skip auto-save for temporary properties (newly added ones without real IDs)
+    if (propertyId.startsWith('temp-')) {
+      console.log('Skipping auto-save for temporary property:', propertyId)
+      return
+    }
+
+    // Mark as saving
+    setSavingProperties(prev => new Set(prev).add(propertyId))
+    setSavedProperties(prev => {
+      const newSet = new Set(prev)
+      newSet.delete(propertyId)
+      return newSet
+    })
+    setSaveErrors(prev => {
+      const newMap = new Map(prev)
+      newMap.delete(propertyId)
+      return newMap
+    })
+
+    try {
+      // Validate required fields
+      if (!property.address?.trim() || !property.type?.trim() || !property.status) {
+        throw new Error('Missing required fields: address, type, and status are required')
+      }
+
+      // Prepare property data for API
+      const propertyData = {
+        user_id: user?.id,
+        workspace_id: null, // Will be set by API
+        address: property.address.trim(),
+        type: property.type.trim(),
+        status: property.status,
+        mortgage_holder: property.mortgageHolder?.trim() || null,
+        total_mortgage_amount: Number(property.totalMortgageAmount) || 0,
+        purchase_price: Number(property.purchasePrice) || 0,
+        current_est_value: Number(property.currentEstValue) || 0,
+        monthly_mortgage_payment: Number(property.monthlyMortgagePayment) || 0,
+        monthly_insurance: Number(property.monthlyInsurance) || 0,
+        monthly_property_tax: Number(property.monthlyPropertyTax) || 0,
+        monthly_other_costs: Number(property.monthlyOtherCosts) || 0,
+        monthly_gross_rent: Number(property.monthlyGrossRent) || 0,
+        ownership: property.ownership?.trim() || null,
+        linked_websites: Array.isArray(property.linkedWebsites) && property.linkedWebsites.length > 0 ? property.linkedWebsites : null,
+      }
+
+      // Extract custom fields
+      const customFieldsData: Record<string, any> = {}
+      Object.keys(property).forEach(key => {
+        if (key.startsWith('custom_')) {
+          customFieldsData[key] = property[key as keyof Property]
+        }
+      })
+
+      const dataToSend = { ...propertyData, ...customFieldsData }
+
+      const response = await fetch(`/api/properties/${propertyId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(dataToSend),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      // Mark as saved
+      setSavingProperties(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(propertyId)
+        return newSet
+      })
+      setSavedProperties(prev => new Set(prev).add(propertyId))
+
+      // Clear saved status after 3 seconds
+      setTimeout(() => {
+        setSavedProperties(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(propertyId)
+          return newSet
+        })
+      }, 3000)
+
+      console.log('✅ Auto-saved property:', property.address)
+
+    } catch (error: any) {
+      console.error('❌ Auto-save failed for property:', property.address, error)
+
+      // Mark as error
+      setSavingProperties(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(propertyId)
+        return newSet
+      })
+      setSaveErrors(prev => new Map(prev).set(propertyId, error.message))
+
+      // Clear error after 5 seconds
+      setTimeout(() => {
+        setSaveErrors(prev => {
+          const newMap = new Map(prev)
+          newMap.delete(propertyId)
+          return newMap
+        })
+      }, 5000)
+    }
+  }
+
+  // Calculate monthly total costs (use manual value if set, otherwise calculate)
   const calculateMonthlyCosts = useCallback((property: Property): number => {
+    if (property.monthlyTotalCosts !== undefined && property.monthlyTotalCosts !== null) {
+      return property.monthlyTotalCosts
+    }
     return (
       property.monthlyMortgagePayment +
       property.monthlyInsurance +
@@ -252,17 +424,17 @@ export default function PropertiesPage() {
     )
   }, [])
 
-  // Calculate monthly cashflow
+  // Calculate monthly cashflow (automatically recalculated when total costs change)
   const calculateMonthlyCashflow = useCallback((property: Property): number => {
-    return property.monthlyGrossRent - calculateMonthlyCosts(property)
+    const totalCosts = calculateMonthlyCosts(property)
+    return property.monthlyGrossRent - totalCosts
   }, [calculateMonthlyCosts])
 
-  // Calculate Return on Equity (ROE)
-  const calculateROE = (property: Property): number => {
-    const equity = property.currentEstValue - (property.purchasePrice - (property.purchasePrice * 0.2)) // Assuming 20% down
+  // Calculate Annual Return on Investment (ROI)
+  const calculateROI = (property: Property): number => {
     const annualCashflow = calculateMonthlyCashflow(property) * 12
-    if (equity <= 0) return 0
-    return (annualCashflow / equity) * 100
+    if (property.purchasePrice <= 0) return 0
+    return (annualCashflow / property.purchasePrice) * 100
   }
 
   // Filter properties
@@ -278,12 +450,16 @@ export default function PropertiesPage() {
   const sortedProperties = useMemo(() => {
     if (!sortField) return filteredProperties
 
-    const calcCashflow = (p: Property) => p.monthlyGrossRent - (p.monthlyMortgagePayment + p.monthlyInsurance + p.monthlyPropertyTax + p.monthlyOtherCosts)
-    const calcROE = (p: Property) => {
-      const equity = p.currentEstValue - (p.purchasePrice - (p.purchasePrice * 0.2))
+    const calcCashflow = (p: Property) => {
+      const totalCosts = p.monthlyTotalCosts !== undefined && p.monthlyTotalCosts !== null 
+        ? p.monthlyTotalCosts 
+        : (p.monthlyMortgagePayment + p.monthlyInsurance + p.monthlyPropertyTax + p.monthlyOtherCosts)
+      return p.monthlyGrossRent - totalCosts
+    }
+    const calcROI = (p: Property) => {
       const annualCashflow = calcCashflow(p) * 12
-      if (equity <= 0) return 0
-      return (annualCashflow / equity) * 100
+      if (p.purchasePrice <= 0) return 0
+      return (annualCashflow / p.purchasePrice) * 100
     }
 
     return [...filteredProperties].sort((a, b) => {
@@ -315,9 +491,9 @@ export default function PropertiesPage() {
           aValue = calcCashflow(a)
           bValue = calcCashflow(b)
           break
-        case "roe":
-          aValue = calcROE(a)
-          bValue = calcROE(b)
+        case "roi":
+          aValue = calcROI(a)
+          bValue = calcROI(b)
           break
         default:
           return 0
@@ -346,8 +522,11 @@ export default function PropertiesPage() {
       (sum, p) => sum + calculateMonthlyCashflow(p),
       0
     )
-    return { totalProperties, totalEstValue, totalMonthlyCashflow }
-  }, [sortedProperties, calculateMonthlyCashflow])
+    const avgROI = totalProperties > 0
+      ? sortedProperties.reduce((sum, p) => sum + calculateROI(p), 0) / totalProperties
+      : 0
+    return { totalProperties, totalEstValue, totalMonthlyCashflow, avgROI }
+  }, [sortedProperties, calculateMonthlyCashflow, calculateROI])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -373,13 +552,14 @@ export default function PropertiesPage() {
     }
   }
 
-  const formatCurrency = (value: number) => {
+  const formatCurrency = (value: number | undefined | null) => {
+    const numValue = value ?? 0 // Real value if exists, 0 if not
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
-    }).format(value)
+    }).format(numValue)
   }
 
   const formatPercentage = (value: number) => {
@@ -412,10 +592,91 @@ export default function PropertiesPage() {
     }
   }
 
+  const openModalWithTab = (property: Property, tab: "overview" | "rent-roll" | "maintenance" | "websites") => {
+    setSelectedProperty(property)
+    setDefaultModalTab(tab)
+    setIsModalOpen(true)
+  }
+
+  const handlePropertyUpdate = async (propertyId: string, updates: Partial<Property>) => {
+    try {
+      const response = await fetch(`/api/properties/${propertyId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(updates),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        // Map the updated property from database format to frontend format
+        const updatedProperty = data.property
+        const mappedProperty: Property = {
+          id: updatedProperty.id,
+          address: updatedProperty.address,
+          type: updatedProperty.type,
+          status: updatedProperty.status,
+          mortgageHolder: updatedProperty.mortgage_holder,
+          totalMortgageAmount: parseFloat(updatedProperty.total_mortgage_amount) || 0,
+          purchasePrice: parseFloat(updatedProperty.purchase_price) || 0,
+          currentEstValue: parseFloat(updatedProperty.current_est_value) || 0,
+          monthlyMortgagePayment: parseFloat(updatedProperty.monthly_mortgage_payment) || 0,
+          monthlyInsurance: parseFloat(updatedProperty.monthly_insurance) || 0,
+          monthlyPropertyTax: parseFloat(updatedProperty.monthly_property_tax) || 0,
+          monthlyOtherCosts: parseFloat(updatedProperty.monthly_other_costs) || 0,
+          monthlyGrossRent: parseFloat(updatedProperty.monthly_gross_rent) || 0,
+          ownership: updatedProperty.ownership,
+          linkedWebsites: Array.isArray(updatedProperty.linked_websites)
+            ? updatedProperty.linked_websites.filter((item: any) =>
+                typeof item === 'object' && item !== null && 'id' in item && 'name' in item && 'linkedAt' in item
+              )
+            : [],
+          notes: updatedProperty.notes || "",
+          photos: updatedProperty.photos || [],
+          rentRoll: updatedProperty.rent_roll || [], // Load from rent_roll column
+          maintenanceRequests: updatedProperty.maintenance_requests || [], // Load from maintenance_requests column
+        }
+
+        // Restore custom fields from JSONB column
+        if (updatedProperty.custom_fields && typeof updatedProperty.custom_fields === 'object') {
+          Object.keys(updatedProperty.custom_fields).forEach(key => {
+            ;(mappedProperty as any)[key] = updatedProperty.custom_fields[key]
+          })
+        }
+
+        // Update local state with properly mapped property
+        setProperties(properties.map(p => p.id === propertyId ? mappedProperty : p))
+
+        // Update selectedProperty if the modal is showing this property
+        if (selectedProperty && selectedProperty.id === propertyId) {
+          setSelectedProperty(mappedProperty)
+        }
+
+        console.log('Property updated successfully')
+      } else {
+        let errorMessage = 'Failed to update property'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData?.error || `HTTP ${response.status}: ${response.statusText}`
+        } catch (e) {
+          // Response body is not valid JSON or empty
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`
+        }
+        throw new Error(errorMessage)
+      }
+    } catch (error: any) {
+      console.error('Error updating property:', error)
+      alert(`Failed to update property: ${error.message || 'Unknown error'}`)
+      throw error
+    }
+  }
+
   // Handle inline editing
   const handleCellClick = (propertyId: string, field: string, currentValue: any, rawValue?: any) => {
-    // Don't allow editing calculated fields
-    if (field === "monthlyCosts" || field === "monthlyCashflow" || field === "roe") {
+    // Don't allow editing calculated fields (except monthlyTotalCosts which is editable)
+    if (field === "monthlyCashflow" || field === "roi") {
       return
     }
     
@@ -441,7 +702,7 @@ export default function PropertiesPage() {
     const updatedProperties = properties.map((p) => {
       if (p.id === propertyId) {
         const updated = { ...p }
-        
+
         // Handle different field types
         if (field === "status") {
           if (["rented", "vacant", "under_maintenance", "sold"].includes(editValue.toLowerCase())) {
@@ -457,11 +718,13 @@ export default function PropertiesPage() {
             "monthlyPropertyTax",
             "monthlyOtherCosts",
             "monthlyGrossRent",
+            "monthlyTotalCosts",
           ].includes(field)
         ) {
           const numValue = parseFloat(editValue.replace(/[$,\s]/g, ""))
           if (!isNaN(numValue)) {
             ;(updated as any)[field] = numValue
+            // If monthlyTotalCosts is updated, cashflow will auto-recalculate
           }
         } else if (field.startsWith("custom_")) {
           // Handle custom fields
@@ -489,7 +752,7 @@ export default function PropertiesPage() {
             : "100% ownership"
           ;(updated as any)[field] = validOwnership
         }
-        
+
         return updated
       }
       return p
@@ -498,11 +761,171 @@ export default function PropertiesPage() {
     setProperties(updatedProperties)
     setEditingCell(null)
     setEditValue("")
+
+    // Auto-save the updated property (only for existing properties, not temp ones)
+    const updatedProperty = updatedProperties.find((p) => p.id === propertyId)
+    if (updatedProperty && !propertyId.startsWith('temp-')) {
+      // Debounce auto-save to avoid too many API calls
+      const timeoutKey = `${propertyId}-${field}`
+      if (autoSaveTimeouts.current.has(timeoutKey)) {
+        clearTimeout(autoSaveTimeouts.current.get(timeoutKey))
+      }
+
+      const timeoutId = setTimeout(() => {
+        autoSaveProperty(updatedProperty)
+        autoSaveTimeouts.current.delete(timeoutKey)
+      }, 1000) // 1 second debounce
+
+      autoSaveTimeouts.current.set(timeoutKey, timeoutId)
+    }
   }
 
   const handleCellCancel = () => {
     setEditingCell(null)
     setEditValue("")
+  }
+
+  // Save new property (for temp properties)
+  const handleSaveNewProperty = async (tempPropertyId: string) => {
+    const property = properties.find(p => p.id === tempPropertyId)
+    if (!property) {
+      console.error('Property not found for saving:', tempPropertyId)
+      return
+    }
+
+    console.log('Attempting to save property:', {
+      id: property.id,
+      address: property.address,
+      type: property.type,
+      status: property.status
+    })
+
+    // Mark as saving
+    setSavingProperties(prev => new Set(prev).add(tempPropertyId))
+
+    try {
+      // Validate required fields
+      if (!property.address?.trim() || !property.type?.trim() || !property.status) {
+        const missing = []
+        if (!property.address?.trim()) missing.push('address')
+        if (!property.type?.trim()) missing.push('type')
+        if (!property.status) missing.push('status')
+        throw new Error(`Missing required fields: ${missing.join(', ')} are required`)
+      }
+
+      // Prepare property data for API (similar to autoSaveProperty but for POST)
+      const propertyData = {
+        user_id: user?.id,
+        workspace_id: null, // Will be set by API
+        address: property.address.trim(),
+        type: property.type.trim(),
+        status: property.status,
+        mortgage_holder: property.mortgageHolder?.trim() || null,
+        total_mortgage_amount: Number(property.totalMortgageAmount) || 0,
+        purchase_price: Number(property.purchasePrice) || 0,
+        current_est_value: Number(property.currentEstValue) || 0,
+        monthly_mortgage_payment: Number(property.monthlyMortgagePayment) || 0,
+        monthly_insurance: Number(property.monthlyInsurance) || 0,
+        monthly_property_tax: Number(property.monthlyPropertyTax) || 0,
+        monthly_other_costs: Number(property.monthlyOtherCosts) || 0,
+        monthly_gross_rent: Number(property.monthlyGrossRent) || 0,
+        ownership: property.ownership?.trim() || null,
+        linked_websites: Array.isArray(property.linkedWebsites) && property.linkedWebsites.length > 0 ? property.linkedWebsites : null,
+      }
+
+      // Extract custom fields
+      const customFieldsData: Record<string, any> = {}
+      Object.keys(property).forEach(key => {
+        if (key.startsWith('custom_')) {
+          customFieldsData[key] = property[key as keyof Property]
+        }
+      })
+
+      const dataToSend = { ...propertyData, ...customFieldsData }
+
+      const response = await fetch('/api/properties', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          properties: [dataToSend],
+          workspaceId: currentWorkspace?.id,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ Saved new property:', property.address)
+
+      // Add the saved property to the existing list instead of reloading
+      // This avoids potential race conditions with database consistency
+      const savedProperty = result.properties?.[0] || result.property
+      if (savedProperty) {
+        setProperties(prevProperties => {
+          // Remove the temp property and add the saved one
+          const filtered = prevProperties.filter(p => p.id !== tempPropertyId)
+          // Convert saved property to frontend format
+          const convertedProperty: Property = {
+            id: savedProperty.id,
+            address: savedProperty.address,
+            type: savedProperty.type,
+            status: savedProperty.status,
+            mortgageHolder: savedProperty.mortgage_holder,
+            totalMortgageAmount: parseFloat(savedProperty.total_mortgage_amount) || 0,
+            purchasePrice: parseFloat(savedProperty.purchase_price) || 0,
+            currentEstValue: parseFloat(savedProperty.current_est_value) || 0,
+            monthlyMortgagePayment: parseFloat(savedProperty.monthly_mortgage_payment) || 0,
+            monthlyInsurance: parseFloat(savedProperty.monthly_insurance) || 0,
+            monthlyPropertyTax: parseFloat(savedProperty.monthly_property_tax) || 0,
+            monthlyOtherCosts: parseFloat(savedProperty.monthly_other_costs) || 0,
+            monthlyGrossRent: parseFloat(savedProperty.monthly_gross_rent) || 0,
+            ownership: savedProperty.ownership,
+            linkedWebsites: savedProperty.linked_websites || [],
+            notes: savedProperty.notes || "",
+            photos: savedProperty.photos || [],
+            rentRoll: savedProperty.rent_roll || [],
+            maintenanceRequests: savedProperty.maintenance_requests || [],
+          }
+          return [...filtered, convertedProperty]
+        })
+        console.log('Added saved property to existing list:', savedProperty.address)
+      } else {
+        // Fallback: reload if we can't get the saved property
+        const reloadResponse = await fetch('/api/properties')
+        if (reloadResponse.ok) {
+          const reloadData = await reloadResponse.json()
+          setProperties(reloadData.properties || [])
+          console.log('Fallback: reloaded properties after saving new one:', reloadData.properties?.length || 0)
+        } else {
+          console.error('Failed to reload properties after save')
+        }
+      }
+
+      // Mark as saved (though we'll reload so this might not show)
+      setSavingProperties(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(tempPropertyId)
+        return newSet
+      })
+
+    } catch (error: any) {
+      console.error('❌ Failed to save new property:', property.address, error)
+
+      // Mark as error
+      setSavingProperties(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(tempPropertyId)
+        return newSet
+      })
+
+      // Show error
+      alert(`Failed to save property: ${error.message || 'Unknown error'}`)
+    }
   }
 
   const handleSaveProperties = async () => {
@@ -538,7 +961,7 @@ export default function PropertiesPage() {
         },
         body: JSON.stringify({
           properties: properties, // Send all properties, not just "valid" ones
-          workspaceId: null,
+          workspaceId: currentWorkspace?.id,
         }),
       })
 
@@ -573,7 +996,11 @@ export default function PropertiesPage() {
                   monthlyOtherCosts: parseFloat(p.monthly_other_costs) || 0,
                   monthlyGrossRent: parseFloat(p.monthly_gross_rent) || 0,
                   ownership: p.ownership,
-                  linkedWebsites: p.linked_websites || [],
+                  linkedWebsites: Array.isArray(p.linked_websites)
+                    ? p.linked_websites.filter((item: any) =>
+                        typeof item === 'object' && item !== null && 'id' in item && 'name' in item && 'linkedAt' in item
+                      )
+                    : [],
                   rentRoll: [],
                   workRequests: [],
                 }
@@ -675,6 +1102,55 @@ export default function PropertiesPage() {
         )
       }
 
+      if (field === "type") {
+        return (
+          <div className="flex items-center gap-1">
+            <Select
+              value={editValue}
+              onValueChange={setEditValue}
+              onOpenChange={(open) => {
+                if (!open) {
+                  // When select closes, save
+                  handleCellSave()
+                }
+              }}
+            >
+              <SelectTrigger className="h-8 w-40" id={`edit-${propertyId}-${field}`} name={`edit-${propertyId}-${field}`}>
+                <SelectValue placeholder="Select type..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Single Family">Single Family</SelectItem>
+                <SelectItem value="Multi-Family">Multi-Family</SelectItem>
+                <SelectItem value="Condo">Condo</SelectItem>
+                <SelectItem value="Townhouse">Townhouse</SelectItem>
+                <SelectItem value="Commercial">Commercial</SelectItem>
+                <SelectItem value="Land">Land</SelectItem>
+                <SelectItem value="Duplex">Duplex</SelectItem>
+                <SelectItem value="Triplex">Triplex</SelectItem>
+                <SelectItem value="Quadplex">Quadplex</SelectItem>
+                <SelectItem value="Mixed-Use">Mixed-Use</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCellSave}
+              className="h-8 w-8 p-0"
+            >
+              <Check className="h-4 w-4 text-green-600" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCellCancel}
+              className="h-8 w-8 p-0"
+            >
+              <X className="h-4 w-4 text-red-600" />
+            </Button>
+          </div>
+        )
+      }
+
       return (
         <div className="flex items-center gap-1">
           <Input
@@ -734,29 +1210,49 @@ export default function PropertiesPage() {
       "Status",
       "Mortgage Holder",
       "Total Mortgage Amount",
-      "Purchase Price",
-      "Current Est. Value",
       "Monthly Mortgage Payment",
       "Monthly Insurance",
       "Monthly Property Tax",
       "Monthly Other Costs",
+      "Ownership",
+      "Purchase Price",
+      "Current Est. Value",
       "Monthly Gross Rent",
+      "Total Costs",
+      "Monthly Cashflow",
+      "Annual ROI",
+      "Rent Roll Units",
+      "Work Requests",
+      "Linked Websites",
     ]
 
-    const rows = properties.map((p) => [
-      p.address,
-      p.type,
-      p.status,
-      p.mortgageHolder || "",
-      (p.totalMortgageAmount || 0).toString(),
-      p.purchasePrice.toString(),
-      p.currentEstValue.toString(),
-      p.monthlyMortgagePayment.toString(),
-      p.monthlyInsurance.toString(),
-      p.monthlyPropertyTax.toString(),
-      p.monthlyOtherCosts.toString(),
-      p.monthlyGrossRent.toString(),
-    ])
+    const rows = properties.map((p) => {
+      const monthlyCosts = calculateMonthlyCosts(p)
+      const monthlyCashflow = calculateMonthlyCashflow(p)
+      const roi = calculateROI(p)
+
+      return [
+        p.address,
+        p.type,
+        p.status,
+        p.mortgageHolder || "",
+        (p.totalMortgageAmount || 0).toString(),
+        (p.monthlyMortgagePayment || 0).toString(),
+        (p.monthlyInsurance || 0).toString(),
+        (p.monthlyPropertyTax || 0).toString(),
+        (p.monthlyOtherCosts || 0).toString(),
+        p.ownership || "",
+        p.purchasePrice.toString(),
+        p.currentEstValue.toString(),
+        (p.monthlyGrossRent || 0).toString(),
+        monthlyCosts.toString(),
+        monthlyCashflow.toString(),
+        roi.toString(),
+        (p.rentRoll?.length || 0).toString(),
+        (p.maintenanceRequests?.length || 0).toString(),
+        p.linkedWebsites?.map((site: any) => site.name || site).join('; ') || '',
+      ]
+    })
 
     const csvContent = [headers, ...rows]
       .map((row) => row.map((cell) => `"${cell}"`).join(","))
@@ -1023,8 +1519,12 @@ export default function PropertiesPage() {
             monthlyOtherCosts: propertyPartial.monthlyOtherCosts || 0,
             monthlyGrossRent: propertyPartial.monthlyGrossRent || 0,
             rentRoll: propertyPartial.rentRoll || [],
-            workRequests: propertyPartial.workRequests || [],
-            linkedWebsites: propertyPartial.linkedWebsites,
+            maintenanceRequests: propertyPartial.maintenanceRequests || propertyPartial.workRequests || [],
+            linkedWebsites: Array.isArray(propertyPartial.linkedWebsites)
+              ? propertyPartial.linkedWebsites.filter((item: any) =>
+                  typeof item === 'object' && item !== null && 'id' in item && 'name' in item && 'linkedAt' in item
+                )
+              : [],
           }
 
           importedProperties.push(property)
@@ -1080,6 +1580,14 @@ export default function PropertiesPage() {
     { value: "monthlyGrossRent", label: "Monthly Gross Rent" },
   ]
 
+  // Cleanup auto-save timeouts on unmount
+  useEffect(() => {
+    return () => {
+      autoSaveTimeouts.current.forEach(timeoutId => clearTimeout(timeoutId))
+      autoSaveTimeouts.current.clear()
+    }
+  }, [])
+
   if (loading) {
     return (
       <div className="p-4 sm:p-6 lg:p-8 flex items-center justify-center min-h-[400px]">
@@ -1088,7 +1596,7 @@ export default function PropertiesPage() {
           <div className="text-muted-foreground">Loading properties...</div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -1138,7 +1646,7 @@ export default function PropertiesPage() {
               monthlyOtherCosts: 0,
               monthlyGrossRent: 0,
               rentRoll: [],
-              workRequests: [],
+              maintenanceRequests: [],
             }
             setProperties([...properties, newProperty])
             // Focus on the address field of the new row after a short delay
@@ -1153,8 +1661,118 @@ export default function PropertiesPage() {
         </div>
       </div>
 
-      {/* Status Filter */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-3 h-auto p-1">
+          <TabsTrigger 
+            value="parts" 
+            className="flex items-center gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Parts
+          </TabsTrigger>
+          <TabsTrigger 
+            value="stats" 
+            className="flex items-center gap-2 data-[state=active]:bg-green-500 data-[state=active]:text-white"
+          >
+            <TrendingUp className="h-4 w-4" />
+            Stats
+          </TabsTrigger>
+          <TabsTrigger 
+            value="insights" 
+            className="flex items-center gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white"
+          >
+            <Lightbulb className="h-4 w-4" />
+            Insights
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Parts Tab - Charts and Table View */}
+        <TabsContent value="parts" className="space-y-4">
+          {/* Charts Section */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Cash Flow by Property</CardTitle>
+                <CardDescription>Visual breakdown of cash flow</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {sortedProperties.slice(0, 10).map((property) => {
+                    const cashflow = calculateMonthlyCashflow(property)
+                    const maxCashflow = Math.max(...sortedProperties.map(p => Math.abs(calculateMonthlyCashflow(p))), 1)
+                    const percentage = Math.abs(cashflow) / maxCashflow * 100
+                    return (
+                      <div key={property.id} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="truncate flex-1">{property.address}</span>
+                          <span className={`font-semibold ml-2 ${
+                            cashflow >= 0 ? "text-green-600" : "text-red-600"
+                          }`}>
+                            {formatCurrency(cashflow)}
+                          </span>
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${
+                              cashflow >= 0 ? "bg-green-500" : "bg-red-500"
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Expenses Breakdown</CardTitle>
+                <CardDescription>Total costs by category</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {(() => {
+                    const totalMortgage = sortedProperties.reduce((sum, p) => sum + (p.monthlyMortgagePayment || 0), 0)
+                    const totalInsurance = sortedProperties.reduce((sum, p) => sum + (p.monthlyInsurance || 0), 0)
+                    const totalTax = sortedProperties.reduce((sum, p) => sum + (p.monthlyPropertyTax || 0), 0)
+                    const totalOther = sortedProperties.reduce((sum, p) => sum + (p.monthlyOtherCosts || 0), 0)
+                    const totalCosts = totalMortgage + totalInsurance + totalTax + totalOther
+                    
+                    const expenses = [
+                      { label: "Mortgage Payments", value: totalMortgage, color: "bg-blue-500" },
+                      { label: "Insurance", value: totalInsurance, color: "bg-green-500" },
+                      { label: "Property Tax", value: totalTax, color: "bg-yellow-500" },
+                      { label: "Other Costs", value: totalOther, color: "bg-orange-500" },
+                    ]
+
+                    return expenses.map((expense) => {
+                      const percentage = totalCosts > 0 ? (expense.value / totalCosts) * 100 : 0
+                      return (
+                        <div key={expense.label} className="space-y-1">
+                          <div className="flex items-center justify-between text-sm">
+                            <span>{expense.label}</span>
+                            <span className="font-semibold">{formatCurrency(expense.value)}</span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-2">
+                            <div
+                              className={`h-2 rounded-full ${expense.color}`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Status Filter */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
         <span className="text-sm text-muted-foreground whitespace-nowrap">Filter by status:</span>
         <select
           id="statusFilter"
@@ -1173,7 +1791,7 @@ export default function PropertiesPage() {
 
       {/* Table */}
       <div className="border rounded-lg overflow-x-auto">
-        <Table className="min-w-[800px]">
+        <Table className="min-w-[1400px]">
           <TableHeader>
             <TableRow>
               <TableHead
@@ -1194,9 +1812,17 @@ export default function PropertiesPage() {
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
+              <TableHead>Property Type</TableHead>
               <TableHead>Mortgage Holder</TableHead>
               <TableHead className="text-right">Total Mortgage</TableHead>
+              <TableHead className="text-right">Monthly Mortgage</TableHead>
+              <TableHead className="text-right">Monthly Insurance</TableHead>
+              <TableHead className="text-right">Monthly Property Tax</TableHead>
+              <TableHead className="text-right">Monthly Other Costs</TableHead>
               <TableHead>Partners</TableHead>
+              <TableHead>Rent Roll</TableHead>
+              <TableHead>Work Requests</TableHead>
+              <TableHead>Linked Websites</TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 text-right"
                 onClick={() => handleSort("currentEstValue")}
@@ -1236,10 +1862,10 @@ export default function PropertiesPage() {
               </TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 text-right"
-                onClick={() => handleSort("roe")}
+                onClick={() => handleSort("roi")}
               >
                 <div className="flex items-center justify-end gap-2">
-                  ROE
+                  Annual ROI
                   <ArrowUpDown className="h-4 w-4" />
                 </div>
               </TableHead>
@@ -1288,10 +1914,10 @@ export default function PropertiesPage() {
             {sortedProperties.map((property) => {
               const monthlyCosts = calculateMonthlyCosts(property)
               const monthlyCashflow = calculateMonthlyCashflow(property)
-              const roe = calculateROE(property)
+              const roi = calculateROI(property)
               
               // Check if property needs attention
-              const pendingWorkRequests = property.workRequests?.filter(
+              const pendingWorkRequests = property.maintenanceRequests?.filter(
                 (wr) => wr.status === "new" || wr.status === "in_progress"
               ).length || 0
               const hasNegativeCashflow = monthlyCashflow < 0
@@ -1320,6 +1946,38 @@ export default function PropertiesPage() {
                         true,
                         "font-medium"
                       )}
+                      {/* Save Status Indicators (only for existing properties) */}
+                      {!property.id.startsWith('temp-') && (
+                        <>
+                          {savingProperties.has(property.id) && (
+                            <div className="flex items-center gap-1 text-blue-600">
+                              <div className="animate-spin h-3 w-3 border border-blue-600 border-t-transparent rounded-full"></div>
+                              <span className="text-xs">Saving...</span>
+                            </div>
+                          )}
+                          {savedProperties.has(property.id) && (
+                            <div className="flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" />
+                              <span className="text-xs">Saved</span>
+                            </div>
+                          )}
+                          {saveErrors.has(property.id) && (
+                            <div
+                              className="flex items-center gap-1 text-red-600 cursor-help"
+                              title={saveErrors.get(property.id)}
+                            >
+                              <X className="h-3 w-3" />
+                              <span className="text-xs">Error</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {/* New Property Indicator */}
+                      {property.id.startsWith('temp-') && (
+                        <span className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded">
+                          New
+                        </span>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -1332,6 +1990,19 @@ export default function PropertiesPage() {
                         onClick={() => handleCellClick(property.id, "status", property.status, property.status)}
                       >
                         {property.status.replace("_", " ")}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {editingCell?.propertyId === property.id && editingCell?.field === "type" ? (
+                      renderEditableCell(property.id, "type", property.type || "Unknown", property.type || "", true)
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="cursor-pointer hover:opacity-80 transition-opacity text-xs"
+                        onClick={() => handleCellClick(property.id, "type", property.type || "Unknown", property.type || "")}
+                      >
+                        {property.type || "Unknown"}
                       </Badge>
                     )}
                   </TableCell>
@@ -1351,6 +2022,42 @@ export default function PropertiesPage() {
                       "totalMortgageAmount",
                       formatCurrency(property.totalMortgageAmount || 0),
                       property.totalMortgageAmount || 0,
+                      true
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyMortgagePayment",
+                      formatCurrency(property.monthlyMortgagePayment || 0),
+                      property.monthlyMortgagePayment || 0,
+                      true
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyInsurance",
+                      formatCurrency(property.monthlyInsurance || 0),
+                      property.monthlyInsurance || 0,
+                      true
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyPropertyTax",
+                      formatCurrency(property.monthlyPropertyTax || 0),
+                      property.monthlyPropertyTax || 0,
+                      true
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderEditableCell(
+                      property.id,
+                      "monthlyOtherCosts",
+                      formatCurrency(property.monthlyOtherCosts || 0),
+                      property.monthlyOtherCosts || 0,
                       true
                     )}
                   </TableCell>
@@ -1405,12 +2112,127 @@ export default function PropertiesPage() {
                       </span>
                     )}
                   </TableCell>
+                  <TableCell className="text-sm">
+                    {property.rentRoll && property.rentRoll.length > 0 ? (
+                      <div
+                        className={`flex flex-col gap-1 rounded p-1 -m-1 transition-colors ${
+                          property.id.startsWith('temp-')
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'cursor-pointer hover:bg-muted/50'
+                        }`}
+                        onClick={() => !property.id.startsWith('temp-') && openModalWithTab(property, "rent-roll")}
+                        title={property.id.startsWith('temp-') ? "Save property first to manage units" : undefined}
+                      >
+                        <Badge variant="secondary" className="text-xs w-fit">
+                          {property.rentRoll.length} unit{property.rentRoll.length > 1 ? 's' : ''}
+                        </Badge>
+                        <div className="text-xs text-muted-foreground">
+                          Total: {formatCurrency(property.rentRoll.reduce((sum, unit) => sum + unit.monthlyRent, 0))}
+                        </div>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`h-auto p-1 text-xs ${
+                          property.id.startsWith('temp-')
+                            ? 'text-muted-foreground/50 cursor-not-allowed'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                        onClick={() => !property.id.startsWith('temp-') && openModalWithTab(property, "rent-roll")}
+                        disabled={property.id.startsWith('temp-')}
+                        title={property.id.startsWith('temp-') ? "Save property first to manage units" : undefined}
+                      >
+                        <Building className="h-3 w-3 mr-1" />
+                        Manage Units
+                      </Button>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <div className="flex flex-col gap-1">
+                      {property.maintenanceRequests && property.maintenanceRequests.length > 0 ? (
+                        <>
+                          <Badge
+                            variant="outline"
+                            className={`text-xs w-fit ${
+                              property.id.startsWith('temp-')
+                                ? 'opacity-50 cursor-not-allowed'
+                                : 'cursor-pointer hover:bg-muted'
+                            }`}
+                            onClick={() => !property.id.startsWith('temp-') && openModalWithTab(property, "maintenance")}
+                            title={property.id.startsWith('temp-') ? "Save property first to manage maintenance" : undefined}
+                          >
+                            {property.maintenanceRequests.length} request{property.maintenanceRequests.length > 1 ? 's' : ''}
+                          </Badge>
+                          <div className="text-xs text-muted-foreground">
+                            {property.maintenanceRequests.filter(wr => wr.status === 'new' || wr.status === 'in_progress').length} pending
+                          </div>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-auto p-1 text-xs ${
+                            property.id.startsWith('temp-')
+                              ? 'text-muted-foreground/50 cursor-not-allowed'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          onClick={() => !property.id.startsWith('temp-') && openModalWithTab(property, "maintenance")}
+                          disabled={property.id.startsWith('temp-')}
+                          title={property.id.startsWith('temp-') ? "Save property first to manage maintenance" : undefined}
+                        >
+                          <Wrench className="h-3 w-3 mr-1" />
+                          Manage Requests
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <div className="flex flex-col gap-1">
+                      {property.linkedWebsites && property.linkedWebsites.length > 0 ? (
+                        <>
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs w-fit ${
+                              property.id.startsWith('temp-')
+                                ? 'opacity-50 cursor-not-allowed'
+                                : 'cursor-pointer hover:bg-muted'
+                            }`}
+                            onClick={() => !property.id.startsWith('temp-') && openModalWithTab(property, "websites")}
+                            title={property.id.startsWith('temp-') ? "Save property first to manage websites" : undefined}
+                          >
+                            {property.linkedWebsites.length} site{property.linkedWebsites.length > 1 ? 's' : ''}
+                          </Badge>
+                          <div className="text-xs text-muted-foreground max-w-32 truncate">
+                            {property.linkedWebsites.slice(0, 2).map((site: any) => site.name || site).join(', ')}
+                            {property.linkedWebsites.length > 2 && ` +${property.linkedWebsites.length - 2} more`}
+                          </div>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-auto p-1 text-xs ${
+                            property.id.startsWith('temp-')
+                              ? 'text-muted-foreground/50 cursor-not-allowed'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          onClick={() => !property.id.startsWith('temp-') && openModalWithTab(property, "websites")}
+                          disabled={property.id.startsWith('temp-')}
+                          title={property.id.startsWith('temp-') ? "Save property first to manage websites" : undefined}
+                        >
+                          <Globe className="h-3 w-3 mr-1" />
+                          Manage Links
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right">
                     {renderEditableCell(
                       property.id,
                       "currentEstValue",
                       formatCurrency(property.currentEstValue),
-                      property.currentEstValue,
+                      property.currentEstValue ?? 0,
                       true
                     )}
                   </TableCell>
@@ -1419,7 +2241,7 @@ export default function PropertiesPage() {
                       property.id,
                       "purchasePrice",
                       formatCurrency(property.purchasePrice),
-                      property.purchasePrice,
+                      property.purchasePrice ?? 0,
                       true
                     )}
                   </TableCell>
@@ -1428,17 +2250,17 @@ export default function PropertiesPage() {
                       property.id,
                       "monthlyGrossRent",
                       formatCurrency(property.monthlyGrossRent),
-                      property.monthlyGrossRent,
+                      property.monthlyGrossRent ?? 0,
                       true
                     )}
                   </TableCell>
                   <TableCell className="text-right">
                     {renderEditableCell(
                       property.id,
-                      "monthlyCosts",
+                      "monthlyTotalCosts",
                       formatCurrency(monthlyCosts),
-                      monthlyCosts,
-                      false
+                      monthlyCosts ?? 0,
+                      true
                     )}
                   </TableCell>
                   <TableCell
@@ -1457,15 +2279,50 @@ export default function PropertiesPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {renderEditableCell(property.id, "roe", formatPercentage(roe), roe, false)}
+                    {renderEditableCell(property.id, "roi", formatPercentage(roi), roi, false)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Link href={`/properties/${property.id}/details`}>
-                      <Button variant="outline" size="sm">
+                    <div className="flex items-center gap-2 justify-end">
+                      {/* Save Button for New Properties */}
+                      {property.id.startsWith('temp-') && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleSaveNewProperty(property.id)}
+                          disabled={savingProperties.has(property.id) || !property.address?.trim() || !property.type?.trim()}
+                          className="h-8 px-3"
+                          title={
+                            savingProperties.has(property.id)
+                              ? "Saving..."
+                              : !property.address?.trim() || !property.type?.trim()
+                              ? "Fill address and type to save"
+                              : "Save new property"
+                          }
+                        >
+                          {savingProperties.has(property.id) ? (
+                            <>
+                              <div className="animate-spin h-3 w-3 border border-white border-t-transparent rounded-full mr-2"></div>
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="h-3 w-3 mr-2" />
+                              Save
+                            </>
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openModalWithTab(property, "overview")}
+                        disabled={property.id.startsWith('temp-')}
+                        title={property.id.startsWith('temp-') ? "Save property first to access details" : "View property details"}
+                      >
                         <Edit className="mr-2 h-4 w-4" />
                         Details
                       </Button>
-                    </Link>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Button
@@ -1502,12 +2359,45 @@ export default function PropertiesPage() {
           <TableFooter>
             <TableRow className="font-bold bg-muted/50">
               <TableCell colSpan={5}>Portfolio Totals</TableCell>
+              <TableCell></TableCell> {/* Property Type */}
+              <TableCell></TableCell> {/* Mortgage Holder */}
+              <TableCell></TableCell> {/* Total Mortgage */}
               <TableCell className="text-right">
-                {portfolioTotals.totalProperties} Properties
-              </TableCell>
+                {formatCurrency(
+                  sortedProperties.reduce((sum, p) => sum + (p.monthlyMortgagePayment || 0), 0)
+                )}
+              </TableCell> {/* Monthly Mortgage */}
+              <TableCell className="text-right">
+                {formatCurrency(
+                  sortedProperties.reduce((sum, p) => sum + (p.monthlyInsurance || 0), 0)
+                )}
+              </TableCell> {/* Monthly Insurance */}
+              <TableCell className="text-right">
+                {formatCurrency(
+                  sortedProperties.reduce((sum, p) => sum + (p.monthlyPropertyTax || 0), 0)
+                )}
+              </TableCell> {/* Monthly Property Tax */}
+              <TableCell className="text-right">
+                {formatCurrency(
+                  sortedProperties.reduce((sum, p) => sum + (p.monthlyOtherCosts || 0), 0)
+                )}
+              </TableCell> {/* Monthly Other Costs */}
+              <TableCell></TableCell> {/* Partners */}
+              <TableCell className="text-sm">
+                <div className="text-xs">
+                  {sortedProperties.reduce((sum, p) => sum + (p.rentRoll?.length || 0), 0)} total units
+                </div>
+              </TableCell> {/* Rent Roll */}
+              <TableCell className="text-sm">
+                <div className="text-xs">
+                  {sortedProperties.reduce((sum, p) => sum + (p.maintenanceRequests?.length || 0), 0)} total requests
+                </div>
+              </TableCell> {/* Work Requests */}
+              <TableCell></TableCell> {/* Linked Websites */}
               <TableCell className="text-right">
                 {formatCurrency(portfolioTotals.totalEstValue)}
               </TableCell>
+              <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell></TableCell>
               <TableCell
@@ -1529,6 +2419,196 @@ export default function PropertiesPage() {
           </TableFooter>
         </Table>
       </div>
+        </TabsContent>
+
+        {/* Stats Tab - Key Metrics and Numbers */}
+        <TabsContent value="stats" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Properties</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{sortedProperties.length}</div>
+                <p className="text-xs text-muted-foreground">
+                  {sortedProperties.filter(p => p.status === 'rented').length} rented
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Portfolio Value</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(portfolioTotals.totalEstValue)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Average: {formatCurrency(sortedProperties.length > 0 ? portfolioTotals.totalEstValue / sortedProperties.length : 0)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Monthly Cash Flow</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${
+                  portfolioTotals.totalMonthlyCashflow >= 0
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}>
+                  {formatCurrency(portfolioTotals.totalMonthlyCashflow)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Annual: {formatCurrency(portfolioTotals.totalMonthlyCashflow * 12)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Average ROI</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatPercentage(
+                    sortedProperties.length > 0
+                      ? sortedProperties.reduce((sum, p) => sum + calculateROI(p), 0) / sortedProperties.length
+                      : 0
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {sortedProperties.filter(p => calculateROI(p) > 10).length} properties &gt; 10%
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Top Performers</CardTitle>
+                <CardDescription>Properties with highest ROI</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {[...sortedProperties]
+                    .sort((a, b) => calculateROI(b) - calculateROI(a))
+                    .slice(0, 5)
+                    .map((p) => (
+                      <div key={p.id} className="flex items-center justify-between p-2 rounded hover:bg-muted">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{p.address}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Cash Flow: {formatCurrency(calculateMonthlyCashflow(p))}/mo
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-green-600">
+                            {formatPercentage(calculateROI(p))}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Needs Attention</CardTitle>
+                <CardDescription>Properties with negative cash flow or low ROI</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {[...sortedProperties]
+                    .filter((p) => calculateMonthlyCashflow(p) < 0 || calculateROI(p) < 5)
+                    .sort((a, b) => calculateMonthlyCashflow(a) - calculateMonthlyCashflow(b))
+                    .slice(0, 5)
+                    .map((p) => (
+                      <div key={p.id} className="flex items-center justify-between p-2 rounded hover:bg-muted">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{p.address}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Cash Flow: {formatCurrency(calculateMonthlyCashflow(p))}/mo
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-bold ${
+                            calculateROI(p) < 0 ? "text-red-600" : "text-yellow-600"
+                          }`}>
+                            {formatPercentage(calculateROI(p))}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  {sortedProperties.filter((p) => calculateMonthlyCashflow(p) < 0 || calculateROI(p) < 5).length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">All properties performing well!</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Portfolio Statistics</CardTitle>
+              <CardDescription>Key metrics and outliers</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Highest Cash Flow</p>
+                  <p className="text-lg font-semibold">
+                    {sortedProperties.length > 0
+                      ? formatCurrency(Math.max(...sortedProperties.map((p) => calculateMonthlyCashflow(p))))
+                      : "$0"}
+                  </p>
+                  {sortedProperties.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {sortedProperties.find((p) => 
+                        calculateMonthlyCashflow(p) === Math.max(...sortedProperties.map((p) => calculateMonthlyCashflow(p)))
+                      )?.address}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Lowest Cash Flow</p>
+                  <p className="text-lg font-semibold">
+                    {sortedProperties.length > 0
+                      ? formatCurrency(Math.min(...sortedProperties.map((p) => calculateMonthlyCashflow(p))))
+                      : "$0"}
+                  </p>
+                  {sortedProperties.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {sortedProperties.find((p) => 
+                        calculateMonthlyCashflow(p) === Math.min(...sortedProperties.map((p) => calculateMonthlyCashflow(p)))
+                      )?.address}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Average Monthly Costs</p>
+                  <p className="text-lg font-semibold">
+                    {formatCurrency(
+                      sortedProperties.length > 0
+                        ? sortedProperties.reduce((sum, p) => sum + calculateMonthlyCosts(p), 0) / sortedProperties.length
+                        : 0
+                    )}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Insights Tab - AI-Powered Recommendations */}
+        <TabsContent value="insights" className="space-y-4">
+          {/* AI-Powered Portfolio Insights */}
+          <PortfolioAIInsights
+            properties={properties}
+            portfolioMetrics={portfolioTotals}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Import Dialog */}
       <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
@@ -1776,6 +2856,21 @@ export default function PropertiesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Property Details Modal */}
+      {selectedProperty && (
+        <PropertyDetailsModal
+          property={selectedProperty}
+          isOpen={isModalOpen}
+          defaultTab={defaultModalTab}
+          onClose={() => {
+            setIsModalOpen(false)
+            setSelectedProperty(null)
+            setDefaultModalTab("overview")
+          }}
+          onSave={handlePropertyUpdate}
+        />
+      )}
     </div>
   )
 }

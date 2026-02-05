@@ -4,11 +4,18 @@ A personal and business management hub that organizes all of your websites, tool
 
 ## Features
 
+### Workspace Management
+- **Permission-based Workspace Creation**: Control who can create workspaces
+  - **Owners & Admins**: Can create workspaces directly without approval
+  - **Members**: Must submit workspace creation requests for admin/owner approval
+  - **Approval Workflow**: Admins and owners can approve/reject workspace requests
+  - **Request Management**: Dedicated interface for managing pending requests
+
 - 🎨 **Modern UI**: Clean, minimal design inspired by Notion and Linear
 - 🔐 **Authentication**: Powered by Clerk with workspace/organization support
 - 📊 **Dashboard**: High-level KPIs and quick access to your workspace
 - 🎯 **Flexboard**: Draggable and zoomable canvas with customizable "Blops"
-- 🌐 **Websites & Tech Stack**: Track all your websites and their technical details
+- 🌐 **Website Portfolio**: Track all your websites and their technical details
 - 💳 **Subscriptions**: Monitor monthly spend and renewal dates
 - 🏠 **Property Management**: Manage properties, listings, and tasks
 - 🏢 **Agency Management**: Track clients, contacts, and projects
@@ -91,7 +98,7 @@ yarn dev
 
 - `/dashboard` - Main dashboard with KPIs
 - `/board` - Flexboard with draggable blops
-- `/websites` - Websites & Tech Stack management
+- `/websites` - Website Portfolio management
 - `/subscriptions` - Subscription tracking
 - `/properties` - Property management
 - `/agency` - Agency/client management

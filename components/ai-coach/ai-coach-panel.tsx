@@ -1,16 +1,120 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, Component, ReactNode } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Send, Loader2 } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Send, Loader2, Mic, MicOff, Brain } from "lucide-react"
 import { BusinessContext } from "@/lib/ai-coach/context-builder"
 import { MarkdownRenderer } from "./markdown-renderer"
+
+// TypeScript types for Web Speech API
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start(): void
+  stop(): void
+  abort(): void
+  onresult: ((event: SpeechRecognitionEvent) => void) | null
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+  onend: (() => void) | null
+}
+
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList
+  resultIndex: number
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string
+  message: string
+}
+
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+  [index: number]: SpeechRecognitionResult
+}
+
+interface SpeechRecognitionResult {
+  length: number
+  item(index: number): SpeechRecognitionAlternative
+  [index: number]: SpeechRecognitionAlternative
+  isFinal: boolean
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string
+  confidence: number
+}
 
 interface Message {
   role: "user" | "assistant"
   content: string
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: {
+      new (): SpeechRecognition
+    }
+    webkitSpeechRecognition: {
+      new (): SpeechRecognition
+    }
+  }
+}
+
+// Error boundary for AI Coach
+interface ErrorBoundaryState {
+  hasError: boolean
+  error?: Error
+}
+
+interface ErrorBoundaryProps {
+  children: ReactNode
+}
+
+class AiCoachErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error('AI Coach Error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col h-full p-4 space-y-4">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center space-y-4">
+              <div className="text-red-500 text-6xl">⚠️</div>
+              <h3 className="text-lg font-semibold">AI Coach Temporarily Unavailable</h3>
+              <p className="text-muted-foreground max-w-md">
+                There was an error loading the AI coach. This might be due to a temporary issue.
+              </p>
+              <button
+                onClick={() => this.setState({ hasError: false, error: undefined })}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
 }
 
 interface AiCoachPanelProps {
@@ -19,6 +123,10 @@ interface AiCoachPanelProps {
     label: string
     message: string
   }>
+  pageContext?: string // e.g., "dashboard", "properties", "agency", "business"
+  pageData?: Record<string, any> // Specific data visible on the current page
+  selectedModel?: string // Selected AI model
+  onModelChange?: (model: string) => void // Callback when model changes
 }
 
 const DEFAULT_QUICK_ACTIONS = [
@@ -28,7 +136,17 @@ const DEFAULT_QUICK_ACTIONS = [
   { label: "Client summary", message: "Summarize performance across all my clients. Highlight top performers and areas for improvement." },
 ]
 
-export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTIONS }: AiCoachPanelProps) {
+// Internal AI Coach Panel Component
+function AiCoachPanelInternal({
+  initialContext,
+  quickActions = DEFAULT_QUICK_ACTIONS,
+  pageContext,
+  pageData,
+  selectedModel = "auto",
+  onModelChange
+}: AiCoachPanelProps) {
+  console.log('🤖 AiCoachPanel - Received pageContext:', pageContext, 'quickActions:', quickActions?.map(qa => qa.label), 'pageData keys:', pageData ? Object.keys(pageData) : 'none')
+
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -36,8 +154,10 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
     },
   ])
   const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [isLoading, setIsLoading] = useState(false)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -47,8 +167,74 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
     scrollToBottom()
   }, [messages])
 
+  // Initialize speech recognition with browser compatibility check
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition
+
+      if (SpeechRecognition) {
+        try {
+          const recognitionInstance = new SpeechRecognition()
+
+          // Check if we can actually create and configure the instance
+          recognitionInstance.continuous = false
+          recognitionInstance.interimResults = false
+          recognitionInstance.lang = 'en-US'
+
+          recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
+            const transcript = event.results[0][0].transcript
+            setInput(transcript)
+            setIsListening(false)
+          }
+
+          recognitionInstance.onerror = (event: any) => {
+            console.error('Speech recognition error:', event.error)
+            setIsListening(false)
+
+            // Show user-friendly error message
+            if (event.error === 'not-allowed') {
+              alert('Microphone access denied. Please allow microphone access to use voice input.')
+            } else if (event.error === 'no-speech') {
+              // Silent - no speech detected, just stop listening
+            } else {
+              console.warn('Speech recognition error:', event.error)
+            }
+          }
+
+          recognitionInstance.onend = () => {
+            setIsListening(false)
+          }
+
+          setRecognition(recognitionInstance)
+        } catch (error) {
+          console.warn('Failed to initialize speech recognition:', error)
+          // Don't set recognition - speech recognition will be disabled
+        }
+      } else {
+        console.info('Speech recognition not supported in this browser')
+        // Speech recognition will be disabled (recognition remains null)
+      }
+    }
+  }, [])
+
+  const startListening = () => {
+    if (recognition && !isListening) {
+      setIsListening(true)
+      recognition.start()
+    }
+  }
+
+  const stopListening = () => {
+    if (recognition && isListening) {
+      recognition.stop()
+      setIsListening(false)
+    }
+  }
+
   const sendMessage = async (messageText: string) => {
     if (!messageText.trim() || isLoading) return
+
+    setIsLoading(true)
 
     const userMessage: Message = {
       role: "user",
@@ -57,7 +243,6 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
 
     setMessages((prev) => [...prev, userMessage])
     setInput("")
-    setIsLoading(true)
 
     // Create placeholder for streaming response with thinking indicator
     const assistantMessage: Message = {
@@ -75,6 +260,9 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
         body: JSON.stringify({
           message: messageText,
           stream: true, // Enable streaming
+          pageContext: pageContext || null,
+          pageData: pageData || null,
+          model: selectedModel === "auto" ? null : selectedModel, // Pass model if not auto
         }),
       })
 
@@ -90,41 +278,15 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
 
       // Check if response is streaming (text/plain or text/event-stream) or JSON
       const contentType = response.headers.get("content-type") || ""
-      
+
       if (contentType.includes("text/plain") || contentType.includes("text/event-stream")) {
-        // Handle streaming response - plain text chunks with typing simulation
-        setIsLoading(false) // Stop loading indicator once streaming starts
-        
+        // Handle streaming response - display text as it comes in
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
         let fullText = ""
-        let displayedText = ""
-        let hasReceivedFirstChunk = false
-        let typingTimeout: NodeJS.Timeout | null = null
 
         if (!reader) {
           throw new Error("No response body")
-        }
-
-        // Typing simulation - add characters one at a time
-        const typeNextChar = () => {
-          if (displayedText.length < fullText.length) {
-            displayedText = fullText.slice(0, displayedText.length + 1)
-            
-            setMessages((prev) => {
-              const newMessages = [...prev]
-              const lastMessage = newMessages[newMessages.length - 1]
-              if (lastMessage && lastMessage.role === "assistant") {
-                lastMessage.content = displayedText
-              }
-              return newMessages
-            })
-            
-            // Schedule next character (faster typing - 15-25ms per char)
-            const nextChar = fullText[displayedText.length]
-            const delay = nextChar && /[\s.,!?]/.test(nextChar) ? 15 : 20
-            typingTimeout = setTimeout(typeNextChar, delay)
-          }
         }
 
         while (true) {
@@ -134,30 +296,9 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
           // Decode chunk and append to full text
           const chunk = decoder.decode(value, { stream: true })
           if (chunk) {
-            // Replace "Thinking..." with first chunk, then append subsequent chunks
-            if (!hasReceivedFirstChunk) {
-              fullText = chunk
-              displayedText = ""
-              hasReceivedFirstChunk = true
-              // Start typing simulation immediately
-              typeNextChar()
-            } else {
-              // Append new chunk and continue typing
-              fullText += chunk
-              // If typing is caught up, continue typing new content
-              if (!typingTimeout && displayedText.length >= fullText.length - chunk.length) {
-                typeNextChar()
-              }
-            }
-          }
-        }
-        
-        // Ensure final text is displayed (wait for typing to catch up)
-        const waitForTyping = () => {
-          if (displayedText.length < fullText.length) {
-            setTimeout(waitForTyping, 50)
-          } else {
-            // Typing complete
+            fullText += chunk
+
+            // Update the message with the current full text
             setMessages((prev) => {
               const newMessages = [...prev]
               const lastMessage = newMessages[newMessages.length - 1]
@@ -168,10 +309,9 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
             })
           }
         }
-        waitForTyping()
-        
-        // Ensure we have content (remove "Thinking..." if no chunks received)
-        if (!hasReceivedFirstChunk) {
+
+        // If no chunks were received, show a fallback message
+        if (!fullText) {
           setMessages((prev) => {
             const newMessages = [...prev]
             const lastMessage = newMessages[newMessages.length - 1]
@@ -181,43 +321,38 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
             return newMessages
           })
         }
+
+        setIsLoading(false)
       } else {
         // Handle non-streaming JSON response (fallback or cached)
         const data = await response.json()
-        
+
         if (data.error) {
           throw new Error(data.error)
         }
 
         // Update the assistant message with full response
         let replyText = data.reply || "I apologize, but I couldn't generate a response."
-        
+
         // Add database info if available (for visibility)
         if (data.dataInfo && data.dataInfo.hasData) {
           replyText += `\n\n_📊 Found ${data.dataInfo.resultCount} result(s) in your database_`
         } else if (data.dataInfo && !data.dataInfo.hasData && data.dataInfo.sqlQuery !== 'No SQL generated') {
           replyText += `\n\n_💡 Note: I queried your database but didn't find matching data_`
         }
-        
-        // Simulate typing for non-streaming responses too
-        setIsLoading(false)
-        let typedText = ""
-        const typeResponse = () => {
-          if (typedText.length < replyText.length) {
-            typedText = replyText.slice(0, typedText.length + 1)
-            setMessages((prev) => {
-              const newMessages = [...prev]
-              const lastMessage = newMessages[newMessages.length - 1]
-              if (lastMessage.role === "assistant") {
-                lastMessage.content = typedText
-              }
-              return newMessages
-            })
-            setTimeout(typeResponse, 20) // Type 20ms per character
+
+        // Update the assistant message with full response immediately
+        setMessages((prev) => {
+          const newMessages = [...prev]
+          const lastMessage = newMessages[newMessages.length - 1]
+          if (lastMessage.role === "assistant") {
+            lastMessage.content = replyText
           }
-        }
-        typeResponse()
-        
+          return newMessages
+        })
+
+        setIsLoading(false)
+
         // Log database info to console for debugging
         if (data.dataInfo) {
           console.log("Database Query Info:", {
@@ -230,19 +365,18 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
       }
     } catch (error) {
       console.error("Error sending message:", error)
+      setIsLoading(false)
       // Update the error message
       setMessages((prev) => {
         const newMessages = [...prev]
         const lastMessage = newMessages[newMessages.length - 1]
         if (lastMessage.role === "assistant") {
-          lastMessage.content = error instanceof Error 
-            ? `Error: ${error.message}` 
+          lastMessage.content = error instanceof Error
+            ? `Error: ${error.message}`
             : "I apologize, but I'm having trouble processing your request right now. Please try again in a moment."
         }
         return newMessages
       })
-    } finally {
-      setIsLoading(false)
     }
   }
 
@@ -277,14 +411,14 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {messages.map((message, index) => (
           <div
             key={index}
             className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg p-3 ${
+              className={`max-w-[85%] rounded-lg p-3 break-words ${
                 message.role === "user"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted"
@@ -293,7 +427,7 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
               {message.role === "assistant" ? (
                 <MarkdownRenderer content={message.content} />
               ) : (
-                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
               )}
             </div>
           </div>
@@ -311,19 +445,62 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t">
-        <div className="flex gap-2">
+      {/* Model Selection & Input */}
+      <div className="p-4 border-t space-y-3">
+        {/* Model Selector */}
+        <div className="flex items-center gap-2">
+          <Brain className="h-4 w-4 text-muted-foreground" />
+          <Select value={selectedModel} onValueChange={onModelChange || (() => {})}>
+            <SelectTrigger className="w-48 h-8 text-xs">
+              <SelectValue placeholder="Select AI Model" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">🤖 Auto (Recommended)</SelectItem>
+              <SelectItem value="gemini-2.0-flash">⚡ Gemini 2.0 Flash (Free)</SelectItem>
+              <SelectItem value="gemini-1.5-flash">🚀 Gemini 1.5 Flash (Free)</SelectItem>
+              <SelectItem value="gemini-2.0-flash-lite">💡 Gemini 2.0 Flash-Lite (Free)</SelectItem>
+              <SelectItem value="gemini-1.5-pro">🧠 Gemini 1.5 Pro (Paid)</SelectItem>
+              <SelectItem value="gemini-2.5-flash">⭐ Gemini 2.5 Flash (Paid)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="flex gap-2">
           <Input
             id="aiCoachInput"
             name="aiCoachInput"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask me anything about your business..."
-            disabled={isLoading}
+            disabled={isLoading || isListening}
             className="flex-1"
           />
-          <Button type="submit" disabled={isLoading || !input.trim()}>
+          {recognition ? (
+            <Button
+              type="button"
+              variant={isListening ? "destructive" : "outline"}
+              onClick={isListening ? stopListening : startListening}
+              disabled={isLoading}
+              title={isListening ? "Stop recording" : "Start voice input"}
+            >
+              {isListening ? (
+                <MicOff className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={true}
+              title="Voice input not supported in this browser"
+            >
+              <Mic className="h-4 w-4 opacity-50" />
+            </Button>
+          )}
+          <Button type="submit" disabled={isLoading || !input.trim() || isListening}>
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -331,8 +508,23 @@ export function AiCoachPanel({ initialContext, quickActions = DEFAULT_QUICK_ACTI
             )}
           </Button>
         </div>
-      </form>
+        {isListening && recognition && (
+          <div className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
+            <div className="h-2 w-2 bg-red-500 rounded-full animate-pulse" />
+            Listening... Speak now or click the mic to stop.
+          </div>
+        )}
+        </form>
+      </div>
     </div>
   )
 }
 
+// Export with error boundary
+export function AiCoachPanel(props: AiCoachPanelProps) {
+  return (
+    <AiCoachErrorBoundary>
+      <AiCoachPanelInternal {...props} />
+    </AiCoachErrorBoundary>
+  )
+}

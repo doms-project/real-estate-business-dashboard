@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { activityTracker } from '@/lib/activity-tracker'
 
 /**
  * PUT /api/blops/[id] - Update a single blop
@@ -54,6 +55,14 @@ export async function PUT(
       )
     }
 
+    // Log blop update activity
+    try {
+      await activityTracker.logBlopUpdated(userId, data.content, data.workspace_id)
+    } catch (activityError) {
+      console.error('Failed to log blop update activity:', activityError)
+      // Don't fail the main operation if activity logging fails
+    }
+
     return NextResponse.json({ success: true, blop: data })
   } catch (error: any) {
     console.error('Error in PUT /api/blops/[id]:', error)
@@ -90,6 +99,23 @@ export async function DELETE(
 
     const blopId = params.id
 
+    // Get blop content and workspace before deleting
+    const { data: blopData, error: fetchError } = await supabaseAdmin
+      .from('blops')
+      .select('content, workspace_id')
+      .eq('id', blopId)
+      .eq('user_id', userId)
+      .single()
+
+    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "not found"
+      console.error('Error fetching blop:', fetchError)
+      return NextResponse.json(
+        { error: 'Failed to fetch blop', details: fetchError.message },
+        { status: 500 }
+      )
+    }
+
+    // Delete the blop
     const { error } = await supabaseAdmin
       .from('blops')
       .delete()
@@ -102,6 +128,16 @@ export async function DELETE(
         { error: 'Failed to delete blop', details: error.message },
         { status: 500 }
       )
+    }
+
+    // Log blop deletion activity
+    if (blopData?.content) {
+      try {
+        await activityTracker.logBlopDeleted(userId, blopData.content, blopData.workspace_id)
+      } catch (activityError) {
+        console.error('Failed to log blop deletion activity:', activityError)
+        // Don't fail the main operation if activity logging fails
+      }
     }
 
     return NextResponse.json({ success: true })

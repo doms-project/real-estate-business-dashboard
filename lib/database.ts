@@ -5,12 +5,13 @@
 
 /**
  * Execute a raw SQL query against Supabase PostgreSQL database
- * 
+ *
  * @param sql - The SQL query string to execute
+ * @param params - Optional array of parameters for parameterized queries
  * @returns Array of result rows, or empty array if no results
  * @throws Error if query execution fails
  */
-export async function runSupabaseQuery(sql: string): Promise<any[]> {
+export async function runSupabaseQuery(sql: string, params?: any[]): Promise<any[]> {
   const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL
 
   if (!dbUrl) {
@@ -43,11 +44,14 @@ export async function runSupabaseQuery(sql: string): Promise<any[]> {
   })
 
   try {
-    const result = await pool.query(sql)
+    const result = params && params.length > 0
+      ? await pool.query(sql, params)
+      : await pool.query(sql)
     return result.rows
   } catch (error) {
     console.error("Error executing SQL query:", error)
     console.error("SQL query was:", sql.substring(0, 200)) // Log first 200 chars
+    console.error("Parameters:", params)
     throw new Error(`Failed to execute SQL query: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     await pool.end()
