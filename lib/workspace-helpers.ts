@@ -33,6 +33,23 @@ export interface Invitation {
   expires_at: string
   created_at: string
   accepted_at: string | null
+  inviteLink?: string
+}
+
+export interface WorkspaceCreationRequest {
+  id: string
+  requested_by: string
+  workspace_context?: string
+  workspace_name: string
+  reason?: string
+  status: 'pending' | 'approved' | 'rejected' | 'expired'
+  approved_by?: string
+  approved_at?: string
+  rejected_by?: string
+  rejected_at?: string
+  rejection_reason?: string
+  created_at: string
+  expires_at: string
 }
 
 /**
@@ -44,36 +61,64 @@ export async function getOrCreateUserWorkspace(userId: string): Promise<Workspac
     throw new Error('Supabase not configured')
   }
 
-  // First, check if user is a member of any workspace
-  const { data: memberData, error: memberError } = await supabaseAdmin
+  // Get all workspaces user is associated with (as member or owner), ordered by most recent activity
+  const { data: allWorkspaces, error: workspaceError } = await supabaseAdmin
     .from('workspace_members')
-    .select('workspace_id')
+    .select(`
+      workspace_id,
+      joined_at,
+      role,
+      workspaces!inner (
+        id,
+        name,
+        owner_id,
+        created_at,
+        updated_at
+      )
+    `)
     .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle()
+    .order('joined_at', { ascending: false })
 
-  if (memberData && !memberError) {
-    // User is a member, get the workspace
-    const { data: workspace, error } = await supabaseAdmin
-      .from('workspaces')
-      .select('*')
-      .eq('id', memberData.workspace_id)
-      .maybeSingle()
+  if (workspaceError) {
+    console.error('Error fetching user workspaces:', workspaceError)
+  }
 
-    if (workspace && !error) {
-      return workspace as Workspace
+  // If user has workspace memberships, return the most recently joined one
+  if (allWorkspaces && allWorkspaces.length > 0) {
+    const mostRecentMembership = allWorkspaces[0] as any
+    if (mostRecentMembership.workspaces) {
+      return mostRecentMembership.workspaces as Workspace
     }
   }
 
-  // Check if user owns any workspace
+  // Check if user owns any workspace (fallback for legacy data)
   const { data: ownedWorkspace, error: ownedError } = await supabaseAdmin
     .from('workspaces')
     .select('*')
     .eq('owner_id', userId)
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   if (ownedWorkspace && !ownedError) {
+    // Add user as owner member if not already (for legacy workspaces)
+    const { data: existingMember } = await supabaseAdmin
+      .from('workspace_members')
+      .select('id')
+      .eq('workspace_id', ownedWorkspace.id)
+      .eq('user_id', userId)
+      .single()
+
+    if (!existingMember) {
+      await supabaseAdmin
+        .from('workspace_members')
+        .insert({
+          workspace_id: ownedWorkspace.id,
+          user_id: userId,
+          role: 'owner',
+        })
+    }
+
     return ownedWorkspace as Workspace
   }
 
@@ -117,45 +162,360 @@ export async function getUserWorkspaces(userId: string): Promise<Workspace[]> {
     throw new Error('Supabase not configured')
   }
 
-  // Get workspaces user owns
-  const { data: owned, error: ownedError } = await supabaseAdmin
-    .from('workspaces')
-    .select('*')
-    .eq('owner_id', userId)
-
-  // Get workspaces user is a member of
+  // Get all workspaces user is associated with, ordered by most recent membership
   const { data: memberships, error: memberError } = await supabaseAdmin
     .from('workspace_members')
-    .select('workspace_id')
+    .select(`
+      joined_at,
+      workspaces!inner (
+        id,
+        name,
+        owner_id,
+        created_at,
+        updated_at
+      )
+    `)
     .eq('user_id', userId)
+    .order('joined_at', { ascending: false })
 
   if (memberError) {
     console.error('Error fetching memberships:', memberError)
   }
 
-  const workspaceIds = memberships?.map(m => m.workspace_id) || []
-  
-  const { data: memberWorkspaces, error: memberWorkspacesError } = await supabaseAdmin
+  // Extract unique workspaces, maintaining order by most recent membership
+  const workspaceMap = new Map<string, Workspace>()
+  memberships?.forEach((membership: any) => {
+    if (membership.workspaces && !workspaceMap.has(membership.workspaces.id)) {
+      workspaceMap.set(membership.workspaces.id, membership.workspaces as Workspace)
+    }
+  })
+
+  // Check for any owned workspaces not in memberships (legacy data)
+  const { data: ownedWorkspaces, error: ownedError } = await supabaseAdmin
     .from('workspaces')
     .select('*')
-    .in('id', workspaceIds)
+    .eq('owner_id', userId)
 
-  if (memberWorkspacesError) {
-    console.error('Error fetching member workspaces:', memberWorkspacesError)
+  ownedWorkspaces?.forEach(workspace => {
+    if (!workspaceMap.has(workspace.id)) {
+      workspaceMap.set(workspace.id, workspace as Workspace)
+    }
+  })
+
+  return Array.from(workspaceMap.values())
+}
+
+/**
+ * Check if user can create workspace directly (owners and admins)
+ */
+export async function canCreateWorkspaceDirectly(userId: string): Promise<boolean> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
   }
 
-  // Combine and deduplicate
-  const allWorkspaces = [
-    ...(owned || []),
-    ...(memberWorkspaces || []),
-  ]
+  // Check if user owns any workspace
+  const { data: ownedWorkspaces } = await supabaseAdmin
+    .from('workspaces')
+    .select('id')
+    .eq('owner_id', userId)
+    .limit(1)
 
-  // Deduplicate by id
-  const uniqueWorkspaces = Array.from(
-    new Map(allWorkspaces.map(w => [w.id, w])).values()
-  )
+  if (ownedWorkspaces && ownedWorkspaces.length > 0) {
+    return true
+  }
 
-  return uniqueWorkspaces as Workspace[]
+  // Check if user is admin in any workspace
+  const { data: adminMemberships } = await supabaseAdmin
+    .from('workspace_members')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('role', 'admin')
+    .limit(1)
+
+  return !!(adminMemberships && adminMemberships.length > 0)
+}
+
+/**
+ * Get user's highest role across all workspaces
+ */
+export async function getHighestUserRole(userId: string): Promise<'owner' | 'admin' | 'member' | null> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Check if user is owner of any workspace
+  const { data: ownedWorkspaces } = await supabaseAdmin
+    .from('workspaces')
+    .select('id')
+    .eq('owner_id', userId)
+    .limit(1)
+
+  if (ownedWorkspaces && ownedWorkspaces.length > 0) {
+    return 'owner'
+  }
+
+  // Check if user is admin in any workspace
+  const { data: adminMemberships } = await supabaseAdmin
+    .from('workspace_members')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('role', 'admin')
+    .limit(1)
+
+  if (adminMemberships && adminMemberships.length > 0) {
+    return 'admin'
+  }
+
+  // Check if user is member in any workspace
+  const { data: memberships } = await supabaseAdmin
+    .from('workspace_members')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1)
+
+  if (memberships && memberships.length > 0) {
+    return 'member'
+  }
+
+  return null // No workspaces at all
+}
+
+/**
+ * Submit a workspace creation request
+ */
+export async function submitWorkspaceCreationRequest(
+  userId: string,
+  workspaceName: string,
+  reason?: string,
+  workspaceContext?: string
+): Promise<WorkspaceCreationRequest> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Check if user already has any active request for this workspace name
+  const { data: existingRequests } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .select('id, status')
+    .eq('requested_by', userId)
+    .eq('workspace_name', workspaceName.trim())
+    .in('status', ['pending', 'approved'])
+
+  if (existingRequests && existingRequests.length > 0) {
+    const pendingRequest = existingRequests.find(r => r.status === 'pending')
+    const approvedRequest = existingRequests.find(r => r.status === 'approved')
+
+    if (pendingRequest) {
+      throw new Error('You already have a pending request for this workspace name')
+    }
+
+    if (approvedRequest) {
+      throw new Error('You already have an approved request for this workspace name. The workspace should already exist.')
+    }
+  }
+
+  // Check if user can create directly in this workspace
+  let canCreateDirectly = false
+  if (workspaceContext) {
+    // Check role in the specific workspace
+    const userRole = await getUserWorkspaceRole(userId, workspaceContext)
+    canCreateDirectly = userRole === 'owner' || userRole === 'admin'
+  } else {
+    // Fallback to global check if no workspace context
+    canCreateDirectly = await canCreateWorkspaceDirectly(userId)
+  }
+
+  if (canCreateDirectly) {
+    throw new Error('You have permission to create workspaces directly')
+  }
+
+  const { data: request, error } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .insert({
+      requested_by: userId,
+      workspace_context: workspaceContext,
+      workspace_name: workspaceName.trim(),
+      reason: reason?.trim(),
+    })
+    .select()
+    .single()
+
+  if (error || !request) {
+    throw new Error(`Failed to submit request: ${error?.message || 'Unknown error'}`)
+  }
+
+  return request as WorkspaceCreationRequest
+}
+
+/**
+ * Get pending workspace creation requests for workspaces where user is admin/owner
+ */
+export async function getPendingWorkspaceRequests(userId: string): Promise<WorkspaceCreationRequest[]> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Get all workspaces where the user is owner or admin
+  const { data: userWorkspaces, error: workspaceError } = await supabaseAdmin
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', userId)
+    .in('role', ['owner', 'admin'])
+
+  if (workspaceError) {
+    throw new Error(`Failed to fetch user workspaces: ${workspaceError.message}`)
+  }
+
+  // Also check for owned workspaces not in members table
+  const { data: ownedWorkspaces, error: ownedError } = await supabaseAdmin
+    .from('workspaces')
+    .select('id')
+    .eq('owner_id', userId)
+
+  if (ownedError) {
+    throw new Error(`Failed to fetch owned workspaces: ${ownedError.message}`)
+  }
+
+  // Combine workspace IDs
+  const workspaceIds = [
+    ...(userWorkspaces?.map(w => w.workspace_id) || []),
+    ...(ownedWorkspaces?.map(w => w.id) || [])
+  ].filter((id, index, arr) => arr.indexOf(id) === index) // Remove duplicates
+
+  if (workspaceIds.length === 0) {
+    return [] // User has no admin/owner permissions
+  }
+
+  // Get requests from these workspaces only
+  const { data: requests, error } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .select('*')
+    .eq('status', 'pending')
+    .in('workspace_context', workspaceIds)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch requests: ${error.message}`)
+  }
+
+  return (requests || []) as WorkspaceCreationRequest[]
+}
+
+/**
+ * Get user's own workspace creation requests
+ */
+export async function getUserWorkspaceRequests(userId: string): Promise<WorkspaceCreationRequest[]> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  const { data: requests, error } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .select('*')
+    .eq('requested_by', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch requests: ${error.message}`)
+  }
+
+  return (requests || []) as WorkspaceCreationRequest[]
+}
+
+/**
+ * Approve a workspace creation request
+ */
+export async function approveWorkspaceRequest(
+  requestId: string,
+  approverUserId: string,
+  workspaceName: string
+): Promise<WorkspaceCreationRequest> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Check if approver has permission
+  const approverRole = await getHighestUserRole(approverUserId)
+  if (approverRole !== 'owner' && approverRole !== 'admin') {
+    throw new Error('You do not have permission to approve workspace requests')
+  }
+
+  // Update the request
+  const { data: request, error } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .update({
+      status: 'approved',
+      approved_by: approverUserId,
+      approved_at: new Date().toISOString(),
+    })
+    .eq('id', requestId)
+    .eq('status', 'pending')
+    .select()
+    .single()
+
+  if (error || !request) {
+    throw new Error(`Failed to approve request: ${error?.message || 'Request not found or already processed'}`)
+  }
+
+  return request as WorkspaceCreationRequest
+}
+
+/**
+ * Reject a workspace creation request
+ */
+export async function rejectWorkspaceRequest(
+  requestId: string,
+  rejectorUserId: string,
+  rejectionReason?: string
+): Promise<WorkspaceCreationRequest> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Check if rejector has permission
+  const rejectorRole = await getHighestUserRole(rejectorUserId)
+  if (rejectorRole !== 'owner' && rejectorRole !== 'admin') {
+    throw new Error('You do not have permission to reject workspace requests')
+  }
+
+  // Update the request
+  const { data: request, error } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .update({
+      status: 'rejected',
+      rejected_by: rejectorUserId,
+      rejected_at: new Date().toISOString(),
+      rejection_reason: rejectionReason?.trim(),
+    })
+    .eq('id', requestId)
+    .eq('status', 'pending')
+    .select()
+    .single()
+
+  if (error || !request) {
+    throw new Error(`Failed to reject request: ${error?.message || 'Request not found or already processed'}`)
+  }
+
+  return request as WorkspaceCreationRequest
+}
+
+/**
+ * Check if user has an approved request for a specific workspace name
+ */
+export async function hasApprovedRequest(userId: string, workspaceName: string): Promise<boolean> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  const { data: request } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .select('id')
+    .eq('requested_by', userId)
+    .eq('workspace_name', workspaceName.trim())
+    .eq('status', 'approved')
+    .single()
+
+  return !!request
 }
 
 /**
@@ -245,6 +605,53 @@ export async function getUserWorkspaceRole(
     .single()
 
   return (member?.role as 'admin' | 'member') || null
+}
+
+/**
+ * Update a member's role in a workspace
+ */
+export async function updateMemberRole(
+  workspaceId: string,
+  memberUserId: string,
+  newRole: 'admin' | 'member',
+  requesterUserId: string
+): Promise<void> {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Check if requester has permission
+  const requesterRole = await getUserWorkspaceRole(requesterUserId, workspaceId)
+  if (requesterRole !== 'owner' && requesterRole !== 'admin') {
+    throw new Error('You do not have permission to update member roles')
+  }
+
+  // Cannot change the owner's role
+  const memberRole = await getUserWorkspaceRole(memberUserId, workspaceId)
+  if (memberRole === 'owner') {
+    throw new Error('Cannot change workspace owner role')
+  }
+
+  // Cannot change your own role if you're an admin (only owner can change admin roles)
+  if (memberUserId === requesterUserId && requesterRole !== 'owner') {
+    throw new Error('You cannot change your own role')
+  }
+
+  // Validate role
+  if (!['admin', 'member'].includes(newRole)) {
+    throw new Error('Invalid role. Must be admin or member')
+  }
+
+  // Update the role
+  const { error } = await supabaseAdmin
+    .from('workspace_members')
+    .update({ role: newRole })
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', memberUserId)
+
+  if (error) {
+    throw new Error(`Failed to update member role: ${error.message}`)
+  }
 }
 
 

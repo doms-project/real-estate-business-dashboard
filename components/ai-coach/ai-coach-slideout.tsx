@@ -23,18 +23,21 @@ interface AiCoachSlideoutProps {
   pageData?: Record<string, any> // Specific data visible on the current page
 }
 
-export function AiCoachSlideout({ 
-  context, 
-  quickActions, 
-  onClose, 
-  isOpen: externalIsOpen, 
-  onOpenChange, 
-  title = "AI Coach", 
+export function AiCoachSlideout({
+  context,
+  quickActions,
+  onClose,
+  isOpen: externalIsOpen,
+  onOpenChange,
+  title = "AI Coach",
   icon: Icon = Sparkles,
   pageContext,
   pageData
 }: AiCoachSlideoutProps) {
+  console.log('🎯 AiCoachSlideout - Received pageContext:', pageContext, 'pageData:', !!pageData)
+
   const [internalIsOpen, setInternalIsOpen] = useState(false)
+  const [selectedModel, setSelectedModel] = useState("auto")
   const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen
   
   const handleOpenChange = (open: boolean) => {
@@ -86,11 +89,13 @@ export function AiCoachSlideout({
 
           {/* Chat Panel */}
           <div className="flex-1 overflow-hidden">
-            <AiCoachPanel 
-              initialContext={context} 
+            <AiCoachPanel
+              initialContext={context}
               quickActions={quickActions}
               pageContext={pageContext}
               pageData={pageData}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
             />
           </div>
         </div>

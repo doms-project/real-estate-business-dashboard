@@ -20,7 +20,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
  * Server-side Supabase admin client
  * Uses service_role key and bypasses RLS policies
  * Use this in API routes and server components when you need full access
- * 
+ *
  * ⚠️ WARNING: Never expose this client to the client-side!
  */
 export const supabaseAdmin: SupabaseClient | null = supabaseServiceRoleKey
@@ -31,6 +31,22 @@ export const supabaseAdmin: SupabaseClient | null = supabaseServiceRoleKey
       },
     })
   : null
+
+// For development, if service role key is missing, create a client with anon key
+// This is less secure but allows development to work
+export const supabaseAdminFallback: SupabaseClient = supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
 
 /**
  * Get a Supabase client for a specific user

@@ -61,7 +61,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   }, [content])
 
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none">
+    <div className="text-sm leading-relaxed break-words">
       <div dangerouslySetInnerHTML={{ __html: rendered }} />
     </div>
   )

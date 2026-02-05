@@ -1,32 +1,30 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { authMiddleware } from "@clerk/nextjs";
 import { NextResponse } from "next/server";
 
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-]);
+// Configure Clerk middleware for development and production
+export default authMiddleware({
+  // Same authentication rules in development and production
+  publicRoutes: [
+    '/sign-in',
+    '/sign-up',
+    '/',
+    '/invite/(.*)', // Allow access to invitation links without authentication
+    '/api/public(.*)',
+    '/api/workspace/invitations/by-token', // Allow getting invitation details by token
+    // '/api/workspace/invitations/accept', // Removed - requires authentication
+    '/api/ghl/data', // Allow authenticated users to access GHL data
+    '/api/ghl/locations', // Allow access to GHL locations
+    '/api/ghl/metrics(.*)', // Allow access to metrics APIs
+    '/api/ai/business-insights', // Allow access to AI business insights
+  ],
+  // Add clock skew tolerance (helps with minor time sync issues)
+  clockSkewInMs: 300000, // 5 minutes tolerance (300 seconds * 1000ms)
 
-export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    const { userId } = await auth();
-    if (!userId) {
-      // Check if this is an API route
-      if (request.nextUrl.pathname.startsWith("/api")) {
-        // Return 401 for API routes instead of redirecting
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
-      // For page routes, redirect to sign-in
-      const signInUrl = new URL("/sign-in", request.url);
-      signInUrl.searchParams.set("redirect_url", request.url);
-      return NextResponse.redirect(signInUrl);
-    }
-  }
-  
-  return NextResponse.next();
+  // Routes that can always be accessed, and have no authentication information
+  ignoredRoutes: [
+    '/api/health',
+    '/api/public(.*)',
+  ],
 });
 
 export const config = {

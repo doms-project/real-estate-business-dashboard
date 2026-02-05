@@ -4,115 +4,142 @@ import { Card } from "@/components/ui/card"
 import { AiCoachPanel } from "@/components/ai-coach/ai-coach-panel"
 import { buildDashboardContext } from "@/lib/ai-coach/context-builder"
 import { GoHighLevelClient, ClientMetrics } from "@/types/gohighlevel"
+import { runSupabaseQuery } from "@/lib/database"
 
-// Mock data - replace with real database queries
-const mockClients: GoHighLevelClient[] = [
-  {
-    id: "1",
-    name: "Acme Marketing",
-    email: "contact@acme.com",
-    phone: "+1-555-0101",
-    company: "Acme Marketing LLC",
-    subscriptionPlan: "professional",
-    affiliateUserId: "user_123",
-    createdAt: "2024-01-15",
-    updatedAt: "2024-11-30",
-    status: "active",
-  },
-  {
-    id: "2",
-    name: "Tech Startup Inc",
-    email: "hello@techstartup.com",
-    phone: "+1-555-0102",
-    company: "Tech Startup Inc",
-    subscriptionPlan: "agency",
-    affiliateUserId: "user_123",
-    createdAt: "2024-02-20",
-    updatedAt: "2024-11-30",
-    status: "active",
-  },
-]
+async function fetchUserClients(userId: string): Promise<{ clients: GoHighLevelClient[], metrics: Record<string, ClientMetrics> }> {
+  try {
+    // Fetch GHL clients for this user
+    const clientsQuery = `
+      SELECT
+        id,
+        name,
+        email,
+        phone,
+        company,
+        subscription_plan,
+        status,
+        ghl_location_id,
+        created_at,
+        updated_at
+      FROM ghl_clients
+      WHERE user_id = $1 AND status = 'active'
+      ORDER BY created_at DESC
+    `
+    const clientsData = await runSupabaseQuery(clientsQuery, [userId])
 
-const mockMetrics: Record<string, ClientMetrics> = {
-  "1": {
-    clientId: "1",
-    currentWeek: {
-      clientId: "1",
-      weekStart: "2024-11-25",
-      weekEnd: "2024-12-01",
-      views: 1247,
-      leads: 34,
-      conversions: 12,
-      revenue: 3400,
-    },
-    lastWeek: {
-      clientId: "1",
-      weekStart: "2024-11-18",
-      weekEnd: "2024-11-24",
-      views: 1156,
-      leads: 28,
-      conversions: 10,
-      revenue: 2800,
-    },
-    thisMonth: {
-      views: 5234,
-      leads: 142,
-      conversions: 48,
-      revenue: 14200,
-    },
-    allTime: {
-      views: 45678,
-      leads: 1234,
-      conversions: 456,
-      revenue: 123400,
-    },
-  },
-  "2": {
-    clientId: "2",
-    currentWeek: {
-      clientId: "2",
-      weekStart: "2024-11-25",
-      weekEnd: "2024-12-01",
-      views: 2341,
-      leads: 67,
-      conversions: 23,
-      revenue: 6700,
-    },
-    lastWeek: {
-      clientId: "2",
-      weekStart: "2024-11-18",
-      weekEnd: "2024-11-24",
-      views: 2156,
-      leads: 59,
-      conversions: 20,
-      revenue: 5900,
-    },
-    thisMonth: {
-      views: 9876,
-      leads: 289,
-      conversions: 98,
-      revenue: 28900,
-    },
-    allTime: {
-      views: 78901,
-      leads: 2345,
-      conversions: 789,
-      revenue: 234500,
-    },
-  },
+    // Convert to GoHighLevelClient format
+    const clients: GoHighLevelClient[] = clientsData.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      company: row.company,
+      subscriptionPlan: row.subscription_plan,
+      affiliateUserId: userId,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      status: row.status,
+    }))
+
+    // Fetch metrics for these clients
+    const metrics: Record<string, ClientMetrics> = {}
+    for (const client of clients) {
+      const metricsQuery = `
+        SELECT
+          week_start,
+          week_end,
+          views,
+          leads,
+          conversions,
+          revenue
+        FROM ghl_weekly_metrics
+        WHERE client_id = $1
+        ORDER BY week_start DESC
+        LIMIT 4
+      `
+      const metricsData = await runSupabaseQuery(metricsQuery, [client.id])
+
+      if (metricsData.length > 0) {
+        // Get current and last week
+        const currentWeek = metricsData.find((m: any) => {
+          const now = new Date()
+          const weekEnd = new Date(m.week_end)
+          const weekStart = new Date(m.week_start)
+          return now >= weekStart && now <= weekEnd
+        }) || metricsData[0]
+
+        const lastWeek = metricsData.find((m: any) => {
+          const currentStart = new Date(currentWeek.week_start)
+          const weekEnd = new Date(m.week_end)
+          return weekEnd < currentStart
+        }) || metricsData[1]
+
+        // Calculate monthly totals (simplified - last 4 weeks)
+        const monthlyMetrics = metricsData.slice(0, 4).reduce((acc: any, m: any) => ({
+          views: acc.views + (m.views || 0),
+          leads: acc.leads + (m.leads || 0),
+          conversions: acc.conversions + (m.conversions || 0),
+          revenue: acc.revenue + (parseFloat(m.revenue) || 0)
+        }), { views: 0, leads: 0, conversions: 0, revenue: 0 })
+
+        // Calculate all-time totals
+        const allTimeMetrics = metricsData.reduce((acc: any, m: any) => ({
+          views: acc.views + (m.views || 0),
+          leads: acc.leads + (m.leads || 0),
+          conversions: acc.conversions + (m.conversions || 0),
+          revenue: acc.revenue + (parseFloat(m.revenue) || 0)
+        }), { views: 0, leads: 0, conversions: 0, revenue: 0 })
+
+        metrics[client.id] = {
+          clientId: client.id,
+          currentWeek: currentWeek ? {
+            clientId: client.id,
+            weekStart: currentWeek.week_start,
+            weekEnd: currentWeek.week_end,
+            views: currentWeek.views || 0,
+            leads: currentWeek.leads || 0,
+            conversions: currentWeek.conversions || 0,
+            revenue: parseFloat(currentWeek.revenue) || 0,
+          } : undefined,
+          lastWeek: lastWeek ? {
+            clientId: client.id,
+            weekStart: lastWeek.week_start,
+            weekEnd: lastWeek.week_end,
+            views: lastWeek.views || 0,
+            leads: lastWeek.leads || 0,
+            conversions: lastWeek.conversions || 0,
+            revenue: parseFloat(lastWeek.revenue) || 0,
+          } : undefined,
+          thisMonth: monthlyMetrics,
+          allTime: allTimeMetrics,
+        }
+      }
+    }
+
+    return { clients, metrics }
+  } catch (error) {
+    console.error('Error fetching user clients and metrics:', error)
+    // Return empty data on error - AI coach will handle gracefully
+    return { clients: [], metrics: {} }
+  }
 }
 
 export default async function AiCoachPage() {
   const user = await currentUser()
-
   if (!user) {
     redirect("/sign-in")
   }
 
-  // Build context from user's data
-  // In production, fetch from database filtered by user.id
-  const userClients = mockClients.filter((c) => c.affiliateUserId === user.id)
-  const context = buildDashboardContext(user.id, userClients, mockMetrics)
+  // Fetch real data from database with error handling
+  let context
+  try {
+    const { clients, metrics } = await fetchUserClients(user.id)
+    context = buildDashboardContext(user.id, clients, metrics)
+  } catch (error) {
+    console.error('Failed to load AI coach data:', error)
+    // Fallback context with no data
+    context = buildDashboardContext(user.id, [], {})
+  }
 
   return (
     <div className="p-8 space-y-8">
@@ -123,7 +150,7 @@ export default async function AiCoachPage() {
         </p>
       </div>
 
-      <Card className="h-[calc(100vh-280px)]">
+      <Card className="h-[calc(100vh-240px)] min-h-[600px]">
         <AiCoachPanel 
           initialContext={context}
           pageContext="ai-coach"

@@ -5,6 +5,82 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================
+-- USERS TABLE (Cached Clerk profiles for display)
+-- ============================================
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, -- Clerk user ID
+  email TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  image_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for users
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
+
+-- Enable RLS for users
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for users (users can read all cached profiles for team display)
+CREATE POLICY "Users can view all user profiles"
+  ON users FOR SELECT
+  USING (true);
+
+CREATE POLICY "Users can insert their own profile"
+  ON users FOR INSERT
+  WITH CHECK (auth.uid()::text = id);
+
+CREATE POLICY "Users can update their own profile"
+  ON users FOR UPDATE
+  USING (auth.uid()::text = id);
+
+-- ============================================
+-- USER PROFILE SYNC FUNCTION
+-- ============================================
+CREATE OR REPLACE FUNCTION sync_user_profile(
+  p_user_id TEXT,
+  p_email TEXT DEFAULT NULL,
+  p_first_name TEXT DEFAULT NULL,
+  p_last_name TEXT DEFAULT NULL,
+  p_image_url TEXT DEFAULT NULL
+)
+RETURNS VOID AS $$
+BEGIN
+  INSERT INTO users (id, email, first_name, last_name, image_url, updated_at)
+  VALUES (p_user_id, p_email, p_first_name, p_last_name, p_image_url, NOW())
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    first_name = EXCLUDED.first_name,
+    last_name = EXCLUDED.last_name,
+    image_url = EXCLUDED.image_url,
+    updated_at = NOW();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- PIT TOKEN FAILURE LOGS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS pit_token_failures (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id TEXT NOT NULL,
+  location_name TEXT NOT NULL,
+  failure_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  endpoint TEXT NOT NULL,
+  error_message TEXT,
+  resolved BOOLEAN DEFAULT false,
+  resolved_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for PIT token failures
+CREATE INDEX IF NOT EXISTS idx_pit_token_failures_location_id ON pit_token_failures(location_id);
+CREATE INDEX IF NOT EXISTS idx_pit_token_failures_resolved ON pit_token_failures(resolved);
+CREATE INDEX IF NOT EXISTS idx_pit_token_failures_failure_time ON pit_token_failures(failure_time DESC);
+
+-- ============================================
 -- BLOPS TABLE (Flexboard items)
 -- ============================================
 CREATE TABLE blops (
@@ -37,6 +113,21 @@ CREATE TABLE websites (
   subscription_ids TEXT[], -- Array of subscription IDs
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- CLIENT WEBSITE MAPPING TABLE
+-- ============================================
+CREATE TABLE client_websites (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  ghl_location_id TEXT NOT NULL, -- GHL location/client ID
+  site_id TEXT NOT NULL, -- Website analytics siteId
+  website_name TEXT, -- Human readable name
+  website_url TEXT, -- Website URL
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(ghl_location_id, site_id) -- Prevent duplicate mappings
 );
 
 -- ============================================
@@ -165,6 +256,22 @@ CREATE TABLE ghl_weekly_metrics (
 );
 
 -- ============================================
+-- GOHIGHLEVEL MONTHLY METRICS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS ghl_monthly_metrics (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id TEXT NOT NULL, -- GHL location ID
+  month_start DATE NOT NULL, -- First day of the month
+  contacts_count INTEGER DEFAULT 0,
+  conversations_count INTEGER DEFAULT 0,
+  opportunities_count INTEGER DEFAULT 0,
+  opportunities_value DECIMAL(12, 2) DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(location_id, month_start)
+);
+
+-- ============================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================
 
@@ -203,6 +310,8 @@ CREATE INDEX idx_agency_clients_workspace_id ON agency_clients(workspace_id);
 CREATE INDEX idx_ghl_clients_user_id ON ghl_clients(user_id);
 CREATE INDEX idx_ghl_metrics_client_id ON ghl_weekly_metrics(client_id);
 CREATE INDEX idx_ghl_metrics_week ON ghl_weekly_metrics(week_start);
+CREATE INDEX idx_ghl_monthly_metrics_location_id ON ghl_monthly_metrics(location_id);
+CREATE INDEX idx_ghl_monthly_metrics_month ON ghl_monthly_metrics(month_start);
 
 -- ============================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -278,22 +387,42 @@ CREATE POLICY "Users can delete their own subscriptions"
   ON subscriptions FOR DELETE
   USING (true);
 
--- Properties policies
-CREATE POLICY "Users can view their own properties"
+-- Properties policies (Workspace-based access)
+CREATE POLICY "Workspace members can view properties"
   ON properties FOR SELECT
-  USING (true);
+  USING (
+    workspace_id IN (
+      SELECT workspace_id FROM workspace_members
+      WHERE user_id = auth.uid()::text
+    ) OR workspace_id IS NULL -- Allow legacy properties without workspace
+  );
 
-CREATE POLICY "Users can insert their own properties"
+CREATE POLICY "Workspace members can insert properties"
   ON properties FOR INSERT
-  WITH CHECK (true);
+  WITH CHECK (
+    workspace_id IN (
+      SELECT workspace_id FROM workspace_members
+      WHERE user_id = auth.uid()::text
+    )
+  );
 
-CREATE POLICY "Users can update their own properties"
+CREATE POLICY "Workspace members can update properties"
   ON properties FOR UPDATE
-  USING (true);
+  USING (
+    workspace_id IN (
+      SELECT workspace_id FROM workspace_members
+      WHERE user_id = auth.uid()::text
+    )
+  );
 
-CREATE POLICY "Users can delete their own properties"
+CREATE POLICY "Workspace members can delete properties"
   ON properties FOR DELETE
-  USING (true);
+  USING (
+    workspace_id IN (
+      SELECT workspace_id FROM workspace_members
+      WHERE user_id = auth.uid()::text
+    )
+  );
 
 -- Rent roll units policies (inherit from property)
 CREATE POLICY "Users can view rent roll units for their properties"
@@ -371,6 +500,18 @@ CREATE POLICY "Users can manage metrics for their GHL clients"
     )
   );
 
+-- Enable RLS for monthly metrics
+ALTER TABLE ghl_monthly_metrics ENABLE ROW LEVEL SECURITY;
+
+-- Monthly metrics policies (allow all operations for now - adjust based on your auth setup)
+CREATE POLICY "Users can view monthly metrics"
+  ON ghl_monthly_metrics FOR SELECT
+  USING (true);
+
+CREATE POLICY "Users can manage monthly metrics"
+  ON ghl_monthly_metrics FOR ALL
+  USING (true);
+
 -- ============================================
 -- FUNCTIONS FOR UPDATED_AT TIMESTAMP
 -- ============================================
@@ -409,3 +550,52 @@ CREATE TRIGGER update_agency_clients_updated_at BEFORE UPDATE ON agency_clients
 CREATE TRIGGER update_ghl_clients_updated_at BEFORE UPDATE ON ghl_clients
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- ============================================
+-- ACTIVITIES TABLE (Recent Activity Feed)
+-- ============================================
+CREATE TABLE activities (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  workspace_id TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for activities
+CREATE INDEX idx_activities_user_id ON activities(user_id);
+CREATE INDEX idx_activities_workspace_id ON activities(workspace_id);
+CREATE INDEX idx_activities_type ON activities(type);
+CREATE INDEX idx_activities_created_at ON activities(created_at DESC);
+
+-- Enable RLS for activities
+ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for activities
+CREATE POLICY "Users can view their own activities" ON activities
+  FOR SELECT USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can insert their own activities" ON activities
+  FOR INSERT WITH CHECK (auth.uid()::text = user_id);
+
+-- Enable realtime for activities table
+ALTER PUBLICATION supabase_realtime ADD TABLE activities;
+
+-- Enable realtime for workspaces table
+ALTER PUBLICATION supabase_realtime ADD TABLE workspaces;-- Auto-cleanup function for old activities (keeps only 2 days / 48 hours)
+CREATE OR REPLACE FUNCTION cleanup_old_activities()
+RETURNS TABLE(deleted_count bigint) AS $$
+DECLARE
+  deleted_count bigint;
+BEGIN
+  DELETE FROM activities
+  WHERE created_at < NOW() - INTERVAL '2 days';  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+  RETURN QUERY SELECT deleted_count;
+END;
+$$ LANGUAGE plpgsql;-- Note: To enable automatic daily cleanup, install pg_cron extension and run:
+-- SELECT cron.schedule('cleanup-activities-daily', '0 0 * * *', 'SELECT cleanup_old_activities();');
+--
+-- Alternatively, run the cleanup script manually:
+-- npm run cleanup:activities

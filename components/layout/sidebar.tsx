@@ -16,11 +16,13 @@ import {
   ChevronDown,
   ChevronRight,
   Rocket,
-  Sparkles
+  Sparkles,
+  LogOut
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useState } from "react"
-import { useOrganizationList, useUser } from "@clerk/nextjs"
+import { useState, useEffect } from "react"
+import { useOrganizationList, useUser, SignOutButton } from "@clerk/nextjs"
+import { useWorkspace } from "@/components/workspace-context"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -43,7 +45,7 @@ const navItems: NavItem[] = [
   { title: "Property Management", href: "/properties", icon: Home },
   { title: "Agency Management", href: "/agency", icon: Building2 },
   { title: "Business Hub", href: "/business", icon: Briefcase },
-  { title: "Health & Productivity", href: "/health", icon: Heart },
+  { title: "Personal Health", href: "/personal-health", icon: Heart },
   { title: "Settings", href: "/settings", icon: Settings },
 ]
 
@@ -57,8 +59,9 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
   const pathname = usePathname()
   const { user } = useUser()
   const { userMemberships, setActive, isLoaded } = useOrganizationList()
+  const { currentWorkspace, availableWorkspaces, loading: workspaceLoading, setCurrentWorkspace } = useWorkspace()
   const [collapsed, setCollapsed] = useState(false)
-  
+
   const organizationList = userMemberships?.data || []
 
   return (
@@ -146,21 +149,65 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="w-full justify-start">
-                {organizationList?.[0]?.organization?.name || "Personal"}
+                {workspaceLoading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    <span>Loading...</span>
+                  </div>
+                ) : (
+                  currentWorkspace?.name || "No Workspace"
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuItem onClick={() => setActive?.({ organization: null })}>
-                Personal
-              </DropdownMenuItem>
-              {organizationList?.map(({ organization }) => (
+              <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                Your Workspaces
+              </div>
+              {availableWorkspaces.map((workspace) => (
                 <DropdownMenuItem
-                  key={organization.id}
-                  onClick={() => setActive?.({ organization: organization.id })}
+                  key={workspace.id}
+                  onClick={() => setCurrentWorkspace(workspace)}
+                  className={currentWorkspace?.id === workspace.id ? "bg-accent" : ""}
                 >
-                  {organization.name}
+                  <div className="flex flex-col">
+                    <span className="font-medium">{workspace.name}</span>
+                    {currentWorkspace?.id === workspace.id && (
+                      <span className="text-xs text-muted-foreground">Current</span>
+                    )}
+                  </div>
+                  {currentWorkspace?.id === workspace.id && (
+                    <svg className="h-4 w-4 ml-auto" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
                 </DropdownMenuItem>
               ))}
+
+              {availableWorkspaces.length === 0 && (
+                <DropdownMenuItem disabled>
+                  <span className="text-sm text-muted-foreground">No workspaces available</span>
+                </DropdownMenuItem>
+              )}
+
+              {organizationList?.length > 0 && (
+                <>
+                  <div className="border-t my-1" />
+                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    Clerk Organizations
+                  </div>
+                  <DropdownMenuItem onClick={() => setActive?.({ organization: null })}>
+                    Personal
+                  </DropdownMenuItem>
+                  {organizationList?.map(({ organization }) => (
+                    <DropdownMenuItem
+                      key={organization.id}
+                      onClick={() => setActive?.({ organization: organization.id })}
+                    >
+                      {organization.name}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -170,7 +217,7 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
       <nav className="flex-1 space-y-1 p-4">
         {navItems.map((item) => {
           const Icon = item.icon
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+          const isActive = pathname && (pathname === item.href || pathname.startsWith(item.href + "/"))
           
           return (
             <Link
@@ -194,27 +241,35 @@ export function Sidebar({ isOpen = false, onClose, onOpen }: SidebarProps) {
       {/* User Section */}
       {user && (
         <div className="border-t p-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 mb-3">
             <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-              {user.imageUrl ? (
-                <Image src={user.imageUrl} alt={user.fullName || ""} width={32} height={32} className="h-8 w-8 rounded-full" />
+              {user?.imageUrl ? (
+                <Image src={user!.imageUrl} alt={user!.fullName || ""} width={32} height={32} className="h-8 w-8 rounded-full" />
               ) : (
                 <span className="text-xs font-medium">
-                  {user.firstName?.[0] || user.emailAddresses[0]?.emailAddress[0] || "U"}
+                  {user?.firstName?.[0] || user?.emailAddresses?.[0]?.emailAddress?.[0] || "U"}
                 </span>
               )}
             </div>
-            {!collapsed && (
+            {!collapsed && user && (
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">
-                  {user.fullName || "Tenn Men AI User"}
+                  {user!.fullName || "Tenn Men AI User"}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {user.emailAddresses[0]?.emailAddress}
+                  {user!.emailAddresses?.[0]?.emailAddress}
                 </p>
               </div>
             )}
           </div>
+
+          {/* Sign Out Button */}
+          <SignOutButton>
+            <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors">
+              <LogOut className="h-4 w-4" />
+              {!collapsed && "Sign Out"}
+            </button>
+          </SignOutButton>
         </div>
       )}
 

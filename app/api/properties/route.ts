@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getOrCreateUserWorkspace, getUserWorkspaces } from '@/lib/workspace-helpers'
+import { getOrCreateUserWorkspace, getUserWorkspaces, getUserWorkspaceRole } from '@/lib/workspace-helpers'
 
 /**
  * GET /api/properties - Fetch workspace properties
@@ -24,24 +24,32 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get user's workspaces (handle case where workspace tables don't exist yet)
-    let workspaceIds: string[] = []
-    try {
-      const workspaces = await getUserWorkspaces(userId)
-      workspaceIds = workspaces.map(w => w.id)
-    } catch (workspaceError: any) {
-      // If workspace tables don't exist, fall back to user_id filtering
-      console.warn('Could not fetch workspaces, falling back to user_id filter:', workspaceError.message)
+    // Get workspace ID from query parameters
+    const { searchParams } = new URL(request.url)
+    const workspaceId = searchParams.get('workspaceId')
+
+    if (!workspaceId) {
+      return NextResponse.json(
+        { error: 'Workspace ID is required' },
+        { status: 400 }
+      )
     }
 
-    // Build query - always filter by user_id to ensure we get all user's properties
-    // This ensures properties are found even if workspace system has issues
-    // We filter by user_id first, which will get all properties for this user
-    // regardless of workspace_id value (null, workspace_id, etc.)
+    // Verify user has access to the workspace
+    const userRole = await getUserWorkspaceRole(userId, workspaceId)
+    if (!userRole) {
+      return NextResponse.json(
+        { error: 'Access denied to workspace' },
+        { status: 403 }
+      )
+    }
+
+    // Build query - filter by workspace_id for workspace-based access
+    // All workspace members can see all properties in the workspace
     const { data, error } = await supabaseAdmin
       .from('properties')
       .select('*')
-      .eq('user_id', userId) // Always filter by user_id - this is the primary filter
+      .eq('workspace_id', workspaceId) // Filter by workspace instead of user
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -102,14 +110,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get or create workspace (handle case where workspace tables don't exist yet)
+    // Get or create workspace and verify access
     let targetWorkspaceId: string | null = workspaceId || null
     try {
-      const workspace = await getOrCreateUserWorkspace(userId)
-      targetWorkspaceId = workspaceId || workspace.id
+      if (workspaceId) {
+        // If workspaceId is provided, verify user has access to it
+        const userRole = await getUserWorkspaceRole(userId, workspaceId)
+        if (!userRole) {
+          return NextResponse.json(
+            { error: 'Access denied to workspace' },
+            { status: 403 }
+          )
+        }
+        targetWorkspaceId = workspaceId
+      } else {
+        // If no workspaceId provided, get/create user's default workspace
+        const workspace = await getOrCreateUserWorkspace(userId)
+        targetWorkspaceId = workspace.id
+      }
     } catch (workspaceError: any) {
-      // If workspace tables don't exist, we'll use null and rely on user_id
-      console.warn('Could not get/create workspace, using user_id only:', workspaceError.message)
+      // If workspace system fails, allow with null workspace_id (legacy support)
+      console.warn('Could not verify workspace access, using user_id only:', workspaceError.message)
       targetWorkspaceId = null
     }
 
