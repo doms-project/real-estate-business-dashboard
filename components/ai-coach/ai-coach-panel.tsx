@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Send, Loader2, Mic, MicOff, Brain } from "lucide-react"
 import { BusinessContext } from "@/lib/ai-coach/context-builder"
 import { MarkdownRenderer } from "./markdown-renderer"
+import { useWorkspace } from "@/components/workspace-context"
 
 // TypeScript types for Web Speech API
 interface SpeechRecognition extends EventTarget {
@@ -142,10 +143,12 @@ function AiCoachPanelInternal({
   quickActions = DEFAULT_QUICK_ACTIONS,
   pageContext,
   pageData,
-  selectedModel = "auto",
+  selectedModel = "openrouter-free",
   onModelChange
 }: AiCoachPanelProps) {
   console.log('🤖 AiCoachPanel - Received pageContext:', pageContext, 'quickActions:', quickActions?.map(qa => qa.label), 'pageData keys:', pageData ? Object.keys(pageData) : 'none')
+
+  const { currentWorkspace } = useWorkspace()
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -244,10 +247,10 @@ function AiCoachPanelInternal({
     setMessages((prev) => [...prev, userMessage])
     setInput("")
 
-    // Create placeholder for streaming response with thinking indicator
+    // Create placeholder for streaming response (loading indicator handled by isLoading state)
     const assistantMessage: Message = {
       role: "assistant",
-      content: "Thinking...", // Show thinking immediately
+      content: "", // Start empty, will be filled by streaming response
     }
     setMessages((prev) => [...prev, assistantMessage])
 
@@ -263,6 +266,7 @@ function AiCoachPanelInternal({
           pageContext: pageContext || null,
           pageData: pageData || null,
           model: selectedModel === "auto" ? null : selectedModel, // Pass model if not auto
+          workspaceId: currentWorkspace?.id || null,
         }),
       })
 
@@ -276,7 +280,7 @@ function AiCoachPanelInternal({
         throw new Error(errorMsg)
       }
 
-      // Check if response is streaming (text/plain or text/event-stream) or JSON
+        // Check if response is streaming (text/plain or text/event-stream) or JSON
       const contentType = response.headers.get("content-type") || ""
 
       if (contentType.includes("text/plain") || contentType.includes("text/event-stream")) {
@@ -333,6 +337,13 @@ function AiCoachPanelInternal({
 
         // Update the assistant message with full response
         let replyText = data.reply || "I apologize, but I couldn't generate a response."
+
+        // Add provider/model indicator
+        if (data.provider && data.model) {
+          const providerIcon = data.provider === 'gemini' ? '⚡' : data.provider === 'openrouter' ? '🧠' : '🤖'
+          const providerName = data.provider === 'gemini' ? 'Gemini' : data.provider === 'openrouter' ? 'Claude/OpenRouter' : 'AI'
+          replyText += `\n\n_${providerIcon} Powered by ${providerName}_`
+        }
 
         // Add database info if available (for visibility)
         if (data.dataInfo && data.dataInfo.hasData) {
@@ -455,12 +466,16 @@ function AiCoachPanelInternal({
               <SelectValue placeholder="Select AI Model" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">🤖 Auto (Recommended)</SelectItem>
+              <SelectItem value="auto">🤖 Auto (Recommended - OpenRouter Free → Gemini fallback)</SelectItem>
               <SelectItem value="gemini-2.0-flash">⚡ Gemini 2.0 Flash (Free)</SelectItem>
               <SelectItem value="gemini-1.5-flash">🚀 Gemini 1.5 Flash (Free)</SelectItem>
               <SelectItem value="gemini-2.0-flash-lite">💡 Gemini 2.0 Flash-Lite (Free)</SelectItem>
               <SelectItem value="gemini-1.5-pro">🧠 Gemini 1.5 Pro (Paid)</SelectItem>
               <SelectItem value="gemini-2.5-flash">⭐ Gemini 2.5 Flash (Paid)</SelectItem>
+              <div className="border-t my-1"></div>
+              <SelectItem value="claude-3.5-sonnet">🧠 Claude 3.5 Sonnet (OpenRouter)</SelectItem>
+              <SelectItem value="claude-3-haiku">⚡ Claude 3 Haiku (OpenRouter)</SelectItem>
+              <SelectItem value="openrouter-free">🔄 OpenRouter Auto (Free Models)</SelectItem>
             </SelectContent>
           </Select>
         </div>

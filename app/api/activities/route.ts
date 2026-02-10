@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { activityTracker } from '@/lib/activity-tracker'
+import { activityTracker, ActivityType, VALID_ACTIVITY_TYPES } from '@/lib/activity-tracker'
 import { getUserWorkspaceRole } from '@/lib/workspace-helpers'
 
 export async function GET(request: NextRequest) {
@@ -55,13 +55,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { type, title, description, metadata } = await request.json()
+    const { type, title, description, metadata, workspaceId } = await request.json()
 
     if (!type || !title || !description) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+      return NextResponse.json({ error: 'Missing required fields: type, title, description' }, { status: 400 })
     }
 
-    await activityTracker.logActivity(userId, type, title, description, metadata)
+    // Validate activity type
+    if (!VALID_ACTIVITY_TYPES.includes(type as ActivityType)) {
+      return NextResponse.json({
+        error: 'Invalid activity type',
+        validTypes: VALID_ACTIVITY_TYPES
+      }, { status: 400 })
+    }
+
+    // Validate workspace access if workspaceId is provided
+    if (workspaceId) {
+      try {
+        const userRole = await getUserWorkspaceRole(userId, workspaceId)
+        if (!userRole) {
+          return NextResponse.json({ error: 'No access to specified workspace' }, { status: 403 })
+        }
+      } catch (workspaceError) {
+        return NextResponse.json({ error: 'Invalid workspace' }, { status: 400 })
+      }
+    }
+
+    await activityTracker.logActivity(userId, type, title, description, workspaceId, metadata)
 
     return NextResponse.json({ success: true })
 

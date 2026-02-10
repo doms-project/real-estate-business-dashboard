@@ -124,7 +124,9 @@ export async function GET(request: NextRequest) {
     try {
       const { userId } = await auth()
       if (userId && campaignsWithMetrics.length > 0) {
-        await activityTracker.logGHLCampaignsFetched(userId, campaignsWithMetrics.length, locationId)
+        const { getOrCreateUserWorkspace } = await import('@/lib/workspace-helpers')
+        const workspace = await getOrCreateUserWorkspace(userId)
+        await activityTracker.logGHLCampaignsFetched(userId, campaignsWithMetrics.length, locationId, workspace.id)
       }
     } catch (activityError) {
       console.error('Failed to log campaigns fetch activity:', activityError)

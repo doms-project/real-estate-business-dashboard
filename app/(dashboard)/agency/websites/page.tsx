@@ -13,6 +13,7 @@ interface Website {
   id: string
   url: string
   name: string
+  saved?: boolean // Track if website is saved to database
   techStack: {
     frontend: string
     backend: string
@@ -46,6 +47,7 @@ export default function WebsitesPage() {
             id: w.id,
             url: w.url,
             name: w.name,
+            saved: true, // Mark as saved since loaded from database
             techStack: w.tech_stack || {
               frontend: "",
               backend: "",
@@ -71,6 +73,7 @@ export default function WebsitesPage() {
       id: crypto.randomUUID(),
       url: "",
       name: "",
+      saved: false, // Mark as not saved initially
       techStack: {
         frontend: "",
         backend: "",
@@ -155,6 +158,13 @@ export default function WebsitesPage() {
 
       if (response.ok) {
         const data = await response.json()
+        // Mark all valid websites as saved
+        setWebsites(currentWebsites =>
+          currentWebsites.map(website => ({
+            ...website,
+            saved: website.url.trim() && website.name.trim() ? true : website.saved
+          }))
+        )
         // Notify other pages that websites have been updated
         window.dispatchEvent(new CustomEvent('websitesUpdated'))
         return // Success - SaveButton will show success state
@@ -188,19 +198,10 @@ export default function WebsitesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <SaveButton
-            onSave={handleSave}
-            disabled={websites.filter(w => w.url.trim() && w.name.trim()).length === 0}
-          />
           <Button onClick={handleAddWebsite}>
             <Plus className="mr-2 h-4 w-4" />
             Add Website
           </Button>
-          {websites.length > 0 && (
-            <div className="text-sm text-muted-foreground ml-4">
-              {websites.filter(w => w.url.trim() && w.name.trim()).length} of {websites.length} websites ready to save
-            </div>
-          )}
         </div>
       </div>
 

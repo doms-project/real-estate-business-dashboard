@@ -73,7 +73,9 @@ export async function POST(request: NextRequest) {
     try {
       const { userId } = await auth()
       if (userId) {
-        await activityTracker.logGHLLocationAdded(userId, data.name)
+        const { getOrCreateUserWorkspace } = await import('@/lib/workspace-helpers')
+        const workspace = await getOrCreateUserWorkspace(userId)
+        await activityTracker.logGHLLocationAdded(userId, data.name, workspace.id)
       }
     } catch (activityError) {
       console.error('Failed to log location addition activity:', activityError)

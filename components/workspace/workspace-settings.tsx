@@ -309,7 +309,7 @@ export function WorkspaceSettings() {
               />
               {workspaceNameConfirmation && workspaceNameConfirmation !== currentWorkspace?.name && (
                 <p className="text-sm text-destructive mt-1">
-                  Workspace name doesn't match. Please type exactly: <strong>{currentWorkspace?.name}</strong>
+                  Workspace name doesn&apos;t match. Please type exactly: <strong>{currentWorkspace?.name}</strong>
                 </p>
               )}
             </div>

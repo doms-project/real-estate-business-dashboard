@@ -26,6 +26,8 @@ interface AIInsight {
   timestamp: number
   error?: string
   details?: string
+  provider?: string
+  model?: string
 }
 
 export function PortfolioAIInsights({ properties, portfolioMetrics }: PortfolioAIInsightsProps) {
@@ -102,16 +104,26 @@ export function PortfolioAIInsights({ properties, portfolioMetrics }: PortfolioA
         timestamp: Date.now()
       })
     }
-  }, [properties, portfolioMetrics, insightStyle])
+  }, [properties, portfolioMetrics, insightStyle, makeAIRequest])
 
 
-  // Auto-fetch insights when properties change or style changes
+  // Initialize with basic portfolio summary instead of automatic AI calls
   useEffect(() => {
-    if (properties.length > 0) {
-      fetchPortfolioAIInsights()
+    if (properties.length > 0 && !portfolioInsights) {
+      // Show basic portfolio stats without AI
+      const totalValue = portfolioMetrics.totalEstValue || 0
+      const totalCashflow = portfolioMetrics.totalMonthlyCashflow || 0
+      const avgROI = portfolioMetrics.avgROI || 0
+
+      setPortfolioInsights({
+        insights: `**Portfolio Overview:**\n\n• ${properties.length} properties in portfolio\n• Total estimated value: $${totalValue.toLocaleString()}\n• Monthly cash flow: $${totalCashflow.toLocaleString()}\n• Average ROI: ${avgROI.toFixed(1)}%\n\nClick "Analyze Portfolio" to get AI-powered insights and recommendations.`,
+        source: 'fallback',
+        cached: false,
+        timestamp: Date.now()
+      })
+      setLastUpdated(new Date())
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [properties.length, insightStyle])
+  }, [properties.length, portfolioMetrics, portfolioInsights])
 
   const getSourceIcon = (source: string) => {
     switch (source) {
@@ -157,15 +169,22 @@ export function PortfolioAIInsights({ properties, portfolioMetrics }: PortfolioA
               </SelectContent>
             </Select>
             <Button
-              variant="outline"
+              variant="default"
               size="sm"
               onClick={() => fetchPortfolioAIInsights(true)}
               disabled={isLoading}
+              className="bg-purple-600 hover:bg-purple-700"
             >
               {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Analyzing...
+                </>
               ) : (
-                <RefreshCw className="h-4 w-4" />
+                <>
+                  <Brain className="h-4 w-4 mr-2" />
+                  Analyze Portfolio
+                </>
               )}
             </Button>
           </div>
@@ -182,6 +201,11 @@ export function PortfolioAIInsights({ properties, portfolioMetrics }: PortfolioA
               <Badge variant={portfolioInsights.source === 'ai' ? 'default' : 'secondary'}>
                 {getSourceLabel(portfolioInsights.source, portfolioInsights.cached)}
               </Badge>
+              {portfolioInsights.provider && (
+                <Badge variant="outline" className="text-xs">
+                  {portfolioInsights.provider === 'openrouter' ? '🧠 Claude/OpenRouter' : '⚡ Gemini'}
+                </Badge>
+              )}
               {lastUpdated && (
                 <span className="text-xs text-muted-foreground">
                   Updated {lastUpdated.toLocaleTimeString()}

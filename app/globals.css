@@ -50,9 +50,10 @@
 }
 
 @layer base {
-  * {
+  /* Temporarily disabled - causing Tailwind build error */
+  /* * {
     @apply border-border;
-  }
+  } */
   body {
     @apply bg-background text-foreground;
   }

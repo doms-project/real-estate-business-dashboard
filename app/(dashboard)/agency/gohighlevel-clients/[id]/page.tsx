@@ -345,17 +345,6 @@ interface LocationAnalytics {
     error?: string
   }
 
-  // Trends and insights (keeping some mock data for now)
-  conversationTrends: {
-    daily: number[]
-    weekly: number[]
-  }
-  topTopics: Array<{
-    topic: string
-    count: number
-    sentiment: 'positive' | 'neutral' | 'negative'
-  }>
-
   // Location details from GHL API
   locationData?: {
     location: {
@@ -950,39 +939,21 @@ export default function LocationAnalyticsPage() {
   // Save monthly metrics to database for growth calculations
   const saveMonthlyMetrics = async (locationId: string, currentAnalytics: any) => {
     try {
-      const { supabaseAdmin } = await import('@/lib/supabase')
+      const response = await fetch('/api/monthly-metrics', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          locationId,
+          analytics: currentAnalytics
+        }),
+      })
 
-      if (!supabaseAdmin) {
-        console.error('Supabase admin client not available')
-        return
-      }
+      const data = await response.json()
 
-      const supabase = supabaseAdmin
-
-      // Get current month start date
-      const now = new Date()
-      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-
-      // Prepare monthly metrics data
-      const monthlyData = {
-        location_id: locationId,
-        month_start: currentMonthStart.toISOString().split('T')[0], // YYYY-MM-DD format
-        contacts_count: currentAnalytics?.contacts || 0,
-        conversations_count: currentAnalytics?.conversations || 0,
-        opportunities_count: currentAnalytics?.pipelineAnalysis?.totalOpportunities || 0,
-        opportunities_value: currentAnalytics?.pipelineAnalysis?.totalValue || 0,
-        updated_at: new Date().toISOString()
-      }
-
-      // Upsert monthly metrics (insert or update if exists)
-      const { error } = await supabase
-        .from('ghl_monthly_metrics')
-        .upsert(monthlyData, {
-          onConflict: 'location_id,month_start'
-        })
-
-      if (error) {
-        console.error('❌ Error saving monthly metrics:', error)
+      if (!response.ok) {
+        console.error('❌ Error saving monthly metrics:', data.error)
       } else {
         console.log('✅ Monthly metrics saved for', locationId)
       }
@@ -991,77 +962,6 @@ export default function LocationAnalyticsPage() {
     }
   }
 
-  // Calculate true month-over-month growth percentage
-  const calculateContactsGrowth = async () => {
-    try {
-      const { supabaseAdmin } = await import('@/lib/supabase')
-
-      if (!supabaseAdmin) {
-        console.error('Supabase admin client not available')
-        return
-      }
-
-      const supabase = supabaseAdmin
-
-      // Get current month and previous month start dates
-      const now = new Date()
-      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-      const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-
-      // Fetch current and previous month metrics
-      const { data: currentMonthData, error: currentError } = await supabase
-        .from('ghl_monthly_metrics')
-        .select('contacts_count')
-        .eq('location_id', locationId)
-        .eq('month_start', currentMonthStart.toISOString().split('T')[0])
-        .single()
-
-      const { data: previousMonthData, error: previousError } = await supabase
-        .from('ghl_monthly_metrics')
-        .select('contacts_count')
-        .eq('location_id', locationId)
-        .eq('month_start', previousMonthStart.toISOString().split('T')[0])
-        .single()
-
-      if (currentError || previousError) {
-        console.log('No historical data yet, using current metrics')
-        // Fallback to current analytics if no historical data
-        const totalContacts = analytics?.contacts || 0;
-        const conversations = analytics?.conversations || 0;
-        const opportunities = analytics?.pipelineAnalysis?.totalOpportunities || 0;
-
-        if (totalContacts === 0) return 0;
-
-        const engagementRate = ((conversations + opportunities) / Math.max(totalContacts, 1)) * 100;
-        return Math.min(Math.round(engagementRate * 0.3), 50);
-      }
-
-      const currentContacts = currentMonthData?.contacts_count || 0
-      const previousContacts = previousMonthData?.contacts_count || 0
-
-      if (previousContacts === 0) {
-        return currentContacts > 0 ? 100 : 0 // If previous was 0 and current > 0, show 100% growth
-      }
-
-      // Calculate month-over-month growth percentage
-      const growthPercent = Math.round(((currentContacts - previousContacts) / previousContacts) * 100)
-
-      // Cap between -100% and +500% for reasonable display
-      return Math.max(-100, Math.min(growthPercent, 500))
-
-    } catch (error) {
-      console.error('❌ Error calculating contacts growth:', error)
-      // Fallback to engagement-based calculation
-      const totalContacts = analytics?.contacts || 0;
-      const conversations = analytics?.conversations || 0;
-      const opportunities = analytics?.pipelineAnalysis?.totalOpportunities || 0;
-
-      if (totalContacts === 0) return 0;
-
-      const engagementRate = ((conversations + opportunities) / Math.max(totalContacts, 1)) * 100;
-      return Math.min(Math.round(engagementRate * 0.3), 50);
-    }
-  };
 
   // Geographic analysis from submission IPs
   const analyzeGeographicPerformance = () => {
@@ -1692,6 +1592,41 @@ export default function LocationAnalyticsPage() {
     } : { forms: [], totalForms: 0 };
   };
 
+  // Calculate true month-over-month growth percentage
+  const calculateContactsGrowth = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/contact-growth?locationId=${encodeURIComponent(locationId)}`)
+      const data = await response.json()
+
+      if (!response.ok) {
+        console.error('❌ Error fetching contact growth:', data.error)
+        // Fallback to engagement-based calculation
+        const totalContacts = analytics?.contacts || 0;
+        const conversations = analytics?.conversations || 0;
+        const opportunities = analytics?.pipelineAnalysis?.totalOpportunities || 0;
+
+        if (totalContacts === 0) return 0;
+
+        const engagementRate = ((conversations + opportunities) / Math.max(totalContacts, 1)) * 100;
+        return Math.min(Math.round(engagementRate * 0.3), 50);
+      }
+
+      return data.growth || 0
+
+    } catch (error) {
+      console.error('❌ Error calculating contacts growth:', error)
+      // Fallback to engagement-based calculation
+      const totalContacts = analytics?.contacts || 0;
+      const conversations = analytics?.conversations || 0;
+      const opportunities = analytics?.pipelineAnalysis?.totalOpportunities || 0;
+
+      if (totalContacts === 0) return 0;
+
+      const engagementRate = ((conversations + opportunities) / Math.max(totalContacts, 1)) * 100;
+      return Math.min(Math.round(engagementRate * 0.3), 50);
+    }
+  }, [analytics, locationId]);
+
   // Generate unique siteId from funnel/website data
   const generateFunnelSiteId = (funnel: any): string => {
     try {
@@ -1797,7 +1732,7 @@ export default function LocationAnalyticsPage() {
         return newState;
       });
     }
-  }, [location?.id]);
+  }, [location?.id, loadingFunnelAnalytics]);
 
   // Fetch analytics for a specific funnel/website
   const fetchFunnelAnalytics = useCallback(async (funnel: any) => {
@@ -1938,6 +1873,10 @@ export default function LocationAnalyticsPage() {
       return
     }
 
+    // Create AbortController for cancelling API calls when component unmounts
+    const abortController = new AbortController()
+    const signal = abortController.signal
+
     const loadLocationData = async () => {
       try {
         // 🔒 SECURITY FIX: Clear old analytics data immediately when changing locations
@@ -1970,7 +1909,10 @@ export default function LocationAnalyticsPage() {
         if (currentLocation) {
           try {
             console.log('🔄 Checking for fresh token in database for location:', locationId)
-            const tokenResponse = await fetch(`/api/ghl/data?endpoint=get-location-token&locationId=${locationId}`)
+            const tokenResponse = await fetch(`/api/ghl/data?endpoint=get-location-token&locationId=${locationId}`, {
+              signal,
+              headers: { 'Content-Type': 'application/json' }
+            })
             if (tokenResponse.ok) {
               const tokenData = await tokenResponse.json()
               if (tokenData.pitToken) {
@@ -2049,7 +1991,10 @@ export default function LocationAnalyticsPage() {
             console.log(`🔄 FRONTEND: Calling API endpoint: ${endpoint} for location ${locationId}`)
             setApiProgress(prev => ({ ...prev, currentEndpoint: endpoint }))
 
-            const response = await fetch(`/api/ghl/data?endpoint=${endpoint}&locationId=${locationId}&pitToken=${currentLocation.pitToken}`)
+            const response = await fetch(`/api/ghl/data?endpoint=${endpoint}&locationId=${locationId}&pitToken=${currentLocation.pitToken}`, {
+              signal,
+              headers: { 'Content-Type': 'application/json' }
+            })
             console.log(`📥 FRONTEND: ${endpoint} response status: ${response.status}`)
 
             const data = await response.json()
@@ -2144,14 +2089,6 @@ export default function LocationAnalyticsPage() {
           workflows: results.find(r => r.endpoint === 'workflows')?.data?.workflows || [],
           funnelsData: results.find(r => r.endpoint === 'funnels')?.data || { funnels: [], summary: {}, apiStatus: {} },
 
-          conversationTrends: { daily: [12, 15, 8, 22, 18, 25, 14], weekly: [89, 124, 156, 98, 145, 167, 134] },
-          topTopics: [
-            { topic: "Property Inquiries", count: 45, sentiment: 'positive' },
-            { topic: "Appointment Scheduling", count: 32, sentiment: 'positive' },
-            { topic: "Pricing Questions", count: 28, sentiment: 'neutral' },
-            { topic: "Response Time Issues", count: 15, sentiment: 'negative' },
-            { topic: "Website Issues", count: 12, sentiment: 'negative' }
-          ],
 
           // Location details from GHL API
           locationData: results.find(r => r.endpoint === 'locations')?.data,
@@ -2267,6 +2204,10 @@ export default function LocationAnalyticsPage() {
         console.log('✅ ANALYTICS STATE SET! UI should now show data')
         console.log('📊 Loaded fresh data from API for location:', locationId)
       } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          console.log('🚫 Location data loading cancelled for:', locationId)
+          return // Exit gracefully when cancelled
+        }
         console.error('Error loading location data:', error)
       } finally {
         setLoading(false)
@@ -2274,7 +2215,13 @@ export default function LocationAnalyticsPage() {
     }
 
     loadLocationData()
-  }, [locationId])
+
+    // Cleanup: Cancel any pending API calls when component unmounts or locationId changes
+    return () => {
+      console.log('🧹 Cleaning up individual location API calls for:', locationId)
+      abortController.abort()
+    }
+  }, [locationId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh analytics data
   useEffect(() => {
@@ -2306,7 +2253,7 @@ export default function LocationAnalyticsPage() {
       clearInterval(interval);
       console.log('🛑 Analytics auto-refresh stopped');
     };
-  }, [autoRefreshEnabled, refreshInterval, refreshFunnelAnalytics]); // loadLocationData is stable
+  }, [autoRefreshEnabled, refreshInterval, refreshFunnelAnalytics, funnelAnalytics]); // loadLocationData is stable
 
   // Manual refresh function
   const handleManualRefresh = useCallback(async (cacheKey?: string, isAggregatedView?: boolean) => {
@@ -2323,7 +2270,9 @@ export default function LocationAnalyticsPage() {
           // Re-run the initial data loading logic for website analytics only
           try {
             // Fetch locations via API with internal access
-            const locationsResponse = await fetch('/api/ghl/locations?internal=true')
+            const locationsResponse = await fetch('/api/ghl/locations?internal=true', {
+              headers: { 'Content-Type': 'application/json' }
+            })
             const locationsData = await locationsResponse.json()
             const allLocations = locationsData.locations || []
             let currentLocation = allLocations.find((loc: any) => loc.id === locationId)
@@ -2350,10 +2299,19 @@ export default function LocationAnalyticsPage() {
             // Fetch fresh analytics data
             const endpoints = ['website-analytics']
             const apiCalls = endpoints.map(endpoint => {
-              return fetch(`/api/ghl/data?endpoint=${endpoint}&locationId=${locationId}&pitToken=${currentLocation.pitToken}`)
+              return fetch(`/api/ghl/data?endpoint=${endpoint}&locationId=${locationId}&pitToken=${currentLocation.pitToken}`, {
+                headers: { 'Content-Type': 'application/json' }
+              })
                 .then(res => res.json())
                 .then(data => ({ endpoint, data: data.data || data }))
-                .catch(() => ({ endpoint, data: {} }))
+                .catch((error) => {
+                  if (error.name === 'AbortError') {
+                    console.log(`🚫 ${endpoint} request cancelled`)
+                    return { endpoint, data: {} }
+                  }
+                  console.error(`❌ ${endpoint} request failed:`, error)
+                  return { endpoint, data: {} }
+                })
             })
 
             const results = await Promise.all(apiCalls)
@@ -2391,11 +2349,11 @@ export default function LocationAnalyticsPage() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, refreshFunnelAnalytics, funnelAnalytics]); // loadLocationData is stable
+  }, [isRefreshing, refreshFunnelAnalytics, funnelAnalytics, locationId]); // loadLocationData is stable
 
   // All data now loads upfront - no lazy loading needed
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     const now = Date.now()
 
     // Only allow refresh if it's been more than 5 seconds since last manual refresh
@@ -2498,14 +2456,6 @@ export default function LocationAnalyticsPage() {
         surveysSubmissions: results.find(r => r.endpoint === 'surveys-submissions')?.data || { submissions: [], totalSurveyResponses: 0 },
         funnelsData: results.find(r => r.endpoint === 'funnels')?.data || { funnels: [], summary: {}, apiStatus: {} },
 
-        conversationTrends: { daily: [12, 15, 8, 22, 18, 25, 14], weekly: [89, 124, 156, 98, 145, 167, 134] },
-        topTopics: [
-          { topic: "Property Inquiries", count: 45, sentiment: 'positive' },
-          { topic: "Appointment Scheduling", count: 32, sentiment: 'positive' },
-          { topic: "Pricing Questions", count: 28, sentiment: 'neutral' },
-          { topic: "Response Time Issues", count: 15, sentiment: 'negative' },
-          { topic: "Website Issues", count: 12, sentiment: 'negative' }
-        ],
 
         socialAnalytics: results.find(r => r.endpoint === 'social-analytics')?.data || { summary: { totalAccounts: 0, totalPosts: 0, totalEngagement: 0, averageEngagementRate: 0 }, accounts: [], platformBreakdown: {}, trends: {}, lastUpdated: new Date().toISOString() },
 
@@ -2558,7 +2508,7 @@ export default function LocationAnalyticsPage() {
     } finally {
       setRefreshing(false)
     }
-  }
+  }, [locationId, lastManualRefresh, socialTimeFilter, setAnalytics, setRefreshing, setLastManualRefresh, analytics?.locationData, analytics?.websiteAnalytics])
 
   // Date formatting function
   const formatDate = (dateString: string) => {
@@ -2593,53 +2543,6 @@ export default function LocationAnalyticsPage() {
     return `${Math.floor(diffDays / 365)}y ago`
   }
 
-  // Fetch detailed survey responses with date filtering and pagination
-  const fetchSurveyResponses = async (surveyId: string, page: number = 1) => {
-    setResponsesLoading(true)
-    try {
-      const startDate = new Date()
-      startDate.setMonth(startDate.getMonth() - 6) // 6 months ago
-
-      const endDate = new Date()
-
-      // Fetch locations via API with internal access
-      const locationsResponse = await fetch('/api/ghl/locations?internal=true')
-      const locationsData = await locationsResponse.json()
-      const allLocations = locationsData.locations || []
-      let currentLocation = allLocations.find((loc: any) => loc.id === locationId)
-
-      if (!currentLocation) {
-        console.error('Location not found for survey responses')
-        return
-      }
-
-      // Try to get fresh token from database
-      try {
-        console.log('🔄 Checking for fresh token in database for survey responses')
-        const tokenResponse = await fetch(`/api/ghl/data?endpoint=get-location-token&locationId=${locationId}`)
-        if (tokenResponse.ok) {
-          const tokenData = await tokenResponse.json()
-          if (tokenData.pitToken) {
-            console.log('✅ Found fresh token for survey responses, using it')
-            currentLocation = { ...currentLocation, pitToken: tokenData.pitToken }
-          }
-        }
-      } catch (tokenError) {
-        console.log('⚠️ Could not get fresh token for survey responses, using config token:', tokenError)
-      }
-
-      const response = await fetch(`/api/ghl/data?endpoint=survey-responses-detailed&locationId=${locationId}&surveyId=${surveyId}&startDate=${startDate.toISOString().split('T')[0]}&endDate=${endDate.toISOString().split('T')[0]}&page=${page}&limit=${responsesPerPage}&pitToken=${currentLocation.pitToken}`)
-      const data = await response.json()
-
-      setSurveyResponses(data.data?.responses || [])
-      console.log(`📊 Loaded ${data.data?.responses?.length || 0} survey responses for page ${page}`)
-    } catch (error) {
-      console.error('Error fetching survey responses:', error)
-      setSurveyResponses([])
-    } finally {
-      setResponsesLoading(false)
-    }
-  }
 
 
   // Handle survey click to open responses modal
@@ -2689,7 +2592,7 @@ export default function LocationAnalyticsPage() {
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [locationId, analytics?.websiteAnalytics?.pageViews])
+  }, [locationId, analytics?.websiteAnalytics?.pageViews, analytics?.websiteAnalytics, handleRefresh])
 
   // Calculate contacts growth when analytics change
   useEffect(() => {
@@ -2733,7 +2636,7 @@ export default function LocationAnalyticsPage() {
     // Auto-fetch analytics for this funnel
     console.log('🔄 Auto-fetching analytics for funnel:', funnel.name);
     fetchFunnelAnalytics(funnel);
-  }, [selectedTrafficItem?.data?.id, location?.id, funnelAnalytics, loadingFunnelAnalytics, fetchFunnelAnalytics]);
+  }, [selectedTrafficItem?.data?.id, location?.id, funnelAnalytics, loadingFunnelAnalytics, fetchFunnelAnalytics, selectedTrafficItem]);
 
   // Refetch social analytics when social time filter changes
   useEffect(() => {
@@ -3131,62 +3034,6 @@ export default function LocationAnalyticsPage() {
               <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
               {refreshing ? 'Refreshing...' : 'Refresh Data'}
             </Button>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={async () => {
-                  try {
-                    console.log('🧪 Testing analytics...')
-                    const response = await fetch('/api/analytics/test', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ siteId: 'youngstown-marketing', eventType: 'page_view' })
-                    })
-                    if (response.ok) {
-                      console.log('✅ Test analytics event sent')
-                      // Auto-refresh after 2 seconds
-                      setTimeout(() => handleRefresh(), 2000)
-                    }
-                  } catch (error) {
-                    console.error('❌ Test analytics failed:', error)
-                  }
-                }}
-                variant="outline"
-                size="sm"
-              >
-                Test Analytics
-              </Button>
-
-              <Button
-                onClick={async () => {
-                  try {
-                    console.log('🔧 Fixing visitor timestamps...')
-                    const response = await fetch('/api/analytics', {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        siteId: 'youngstown-marketing',
-                        action: 'fix_visitor_timestamps'
-                      })
-                    })
-                    if (response.ok) {
-                      const result = await response.json()
-                      console.log('✅ Visitor timestamps fixed:', result)
-                      alert(`Fixed ${result.message}`)
-                      // Auto-refresh after fix
-                      setTimeout(() => handleRefresh(), 1000)
-                    }
-                  } catch (error) {
-                    console.error('❌ Fix failed:', error)
-                    alert('Failed to fix visitor data')
-                  }
-                }}
-                variant="outline"
-                size="sm"
-              >
-                Fix Session Data
-              </Button>
-            </div>
           </div>
         </div>
       </div>
@@ -5500,7 +5347,7 @@ export default function LocationAnalyticsPage() {
                           <span className="text-sm font-medium">Analytics Funnels</span>
                         </div>
                         <p className="text-2xl font-bold mt-2">
-                          {analytics.funnelsData.funnels.filter((f: any) => f.source === 'custom_analytics').length}
+                          {analytics.funnelsData?.funnels?.filter((f: any) => f.source === 'custom_analytics').length || 0}
                         </p>
                       </CardContent>
                     </Card>
@@ -5523,7 +5370,7 @@ export default function LocationAnalyticsPage() {
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold">Available Funnels</h3>
 
-                    {analytics.funnelsData.funnels.length > 0 ? (
+                    {analytics.funnelsData?.funnels?.length > 0 ? (
                       <div className="grid gap-4">
                         {analytics.funnelsData.funnels.map((funnel: any, index: number) => (
                           <Card key={index}>
@@ -5689,45 +5536,9 @@ export default function LocationAnalyticsPage() {
               conversations: analytics.conversations,
               healthScore: analytics.healthScore,
               leadSources: analytics.leadSources,
-              topTopics: analytics.topTopics,
               locationName: location?.name
             }}
           />
-
-          {/* Legacy Static Insights (fallback) */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-purple-500" />
-                Conversation Topics & Trends
-              </CardTitle>
-              <CardDescription>
-                Customer conversation patterns and sentiment analysis
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <h4 className="font-medium mb-3">Top Conversation Topics</h4>
-                <div className="space-y-2">
-                  {analytics.topTopics?.map((topic, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <span className="text-sm">{topic.topic}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-1 rounded text-xs ${
-                          topic.sentiment === 'positive' ? 'bg-green-100 text-green-700' :
-                          topic.sentiment === 'negative' ? 'bg-red-100 text-red-700' :
-                          'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {topic.sentiment}
-                        </span>
-                        <span className="text-sm font-medium">{topic.count}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="workflows" className="space-y-6">

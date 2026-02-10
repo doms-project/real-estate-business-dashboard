@@ -2632,12 +2632,14 @@ async function handleRequest(request: NextRequest, method: 'GET' | 'POST') {
     try {
       const { userId } = await auth()
       if (userId) {
+        const { getOrCreateUserWorkspace } = await import('@/lib/workspace-helpers')
+        const workspace = await getOrCreateUserWorkspace(userId)
         activityTracker.logActivity(
           userId,
           'ghl_sync',
           'GHL Data Synced',
           `Successfully synced data for ${locationId ? 'location' : 'all locations'}`,
-          undefined, // No specific workspace for GHL sync
+          workspace.id,
           { locationId, dataSummary: { contacts: data.contacts?.length || 0, opportunities: data.opportunities?.length || 0 } }
         )
       }

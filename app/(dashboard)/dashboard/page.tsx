@@ -2,13 +2,13 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Users, Building2, MapPin } from "lucide-react"
+import { Users, Building2, MapPin, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { useUser } from "@clerk/nextjs"
 import { AiCoachSlideout } from "@/components/ai-coach/ai-coach-slideout"
 import { buildDashboardContext } from "@/lib/ai-coach/context-builder"
 import { GoHighLevelClient, ClientMetrics } from "@/types/gohighlevel"
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { useGHLData, useContacts, useOpportunities, useConversations } from "@/hooks/use-ghl-data"
 import { activityTracker, getRelativeTime, type Activity } from "@/lib/activity-tracker"
 import { subscribeToUpdates } from "@/lib/realtime-updates"
@@ -119,6 +119,9 @@ export default function DashboardPage() {
   const [activities, setActivities] = useState<Activity[]>([])
   const [teamMemberCount, setTeamMemberCount] = useState<number>(0)
   const [propertyCount, setPropertyCount] = useState<number>(0)
+  const [loadingTeamMembers, setLoadingTeamMembers] = useState(true)
+  const [loadingProperties, setLoadingProperties] = useState(true)
+  const [loadingLocations, setLoadingLocations] = useState(true)
 
 
   // Fetch real data from GHL
@@ -130,11 +133,14 @@ export default function DashboardPage() {
   useEffect(() => {
     const loadLocations = async () => {
       try {
+        setLoadingLocations(true)
         const response = await fetch('/api/ghl/locations')
         const result = await response.json()
         setLocationsData(result)
       } catch (error) {
         console.error('Failed to load locations:', error)
+      } finally {
+        setLoadingLocations(false)
       }
     }
 
@@ -146,9 +152,13 @@ export default function DashboardPage() {
   // Load team member count
   useEffect(() => {
     const loadTeamMemberCount = async () => {
-      if (!currentWorkspace) return
+      if (!currentWorkspace) {
+        setLoadingTeamMembers(false)
+        return
+      }
 
       try {
+        setLoadingTeamMembers(true)
         const response = await fetch(`/api/workspace/members?workspaceId=${currentWorkspace.id}`)
         const result = await response.json()
         if (result.members) {
@@ -157,6 +167,8 @@ export default function DashboardPage() {
       } catch (error) {
         console.error('Failed to load team member count:', error)
         setTeamMemberCount(0)
+      } finally {
+        setLoadingTeamMembers(false)
       }
     }
 
@@ -166,9 +178,13 @@ export default function DashboardPage() {
   // Load property count
   useEffect(() => {
     const loadPropertyCount = async () => {
-      if (!currentWorkspace) return
+      if (!currentWorkspace) {
+        setLoadingProperties(false)
+        return
+      }
 
       try {
+        setLoadingProperties(true)
         const response = await fetch(`/api/properties?workspaceId=${currentWorkspace.id}`)
         const result = await response.json()
         if (result.properties) {
@@ -177,14 +193,17 @@ export default function DashboardPage() {
       } catch (error) {
         console.error('Failed to load property count:', error)
         setPropertyCount(0)
+      } finally {
+        setLoadingProperties(false)
       }
     }
 
     loadPropertyCount()
   }, [currentWorkspace])
 
+
   // Load recent activities
-  const loadActivities = async () => {
+  const loadActivities = useCallback(async () => {
     // Use current workspace for activities
     const workspaceToUse = currentWorkspace
 
@@ -199,21 +218,14 @@ export default function DashboardPage() {
       if (result.activities) {
         setActivities(result.activities)
       } else {
-        // Try without workspace filter as fallback
-        const fallbackResponse = await fetch('/api/activities?limit=30')
-        const fallbackResult = await fallbackResponse.json()
-        if (fallbackResult.activities && fallbackResult.activities.length > 0) {
-          setActivities(fallbackResult.activities)
-        }
+        setActivities([])
       }
     } catch (error) {
       console.error('Failed to load activities:', error)
-      // If no real activities, add some initial mock activities for demo
-      if (activities.length === 0) {
-        addInitialMockActivities(user.id)
-      }
+      // Set empty activities on error
+      setActivities([])
     }
-  }
+  }, [user?.id, currentWorkspace])
 
   useEffect(() => {
     loadActivities()
@@ -222,12 +234,18 @@ export default function DashboardPage() {
     const unsubscribe = subscribeToUpdates('activities', (update) => {
       if (update.type === 'activity_added') {
         console.log('📝 Real-time activity update received:', update.data)
-        // Reload activities when new ones are added
-        loadActivities()
+        // Add new activity to the list if it belongs to current workspace
+        if (update.data?.workspace_id === currentWorkspace?.id) {
+          setActivities(prev => {
+            // Avoid duplicates and keep only 30 most recent
+            const filtered = prev.filter(activity => activity.id !== update.data.id)
+            return [update.data, ...filtered.slice(0, 29)]
+          })
+        }
       } else if (update.type === 'activity_deleted') {
         console.log('📝 Real-time activity deletion received:', update.data)
-        // Reload activities when ones are deleted
-        loadActivities()
+        // Remove deleted activity from the list
+        setActivities(prev => prev.filter(activity => activity.id !== update.data?.id))
       }
     })
 
@@ -235,44 +253,7 @@ export default function DashboardPage() {
     return () => {
       unsubscribe()
     }
-  }, [user?.id, currentWorkspace])
-
-  // Add initial mock activities for demonstration
-  const addInitialMockActivities = (userId: string) => {
-    const now = new Date()
-    const mockActivities = [
-      {
-        title: 'Added new website',
-        description: 'Created website for ABC Realty',
-        timestamp: new Date(now.getTime() - 2 * 60 * 60 * 1000), // 2 hours ago
-      },
-      {
-        title: 'Updated subscription',
-        description: 'Renewed GoHighLevel Pro plan',
-        timestamp: new Date(now.getTime() - 5 * 60 * 60 * 1000), // 5 hours ago
-      },
-      {
-        title: 'Created new blop',
-        description: 'Added marketing campaign blop',
-        timestamp: new Date(now.getTime() - 24 * 60 * 60 * 1000), // 1 day ago
-      }
-    ]
-
-    mockActivities.forEach(activity => {
-      activityTracker.logActivity(
-        userId,
-        'blop_created',
-        activity.title,
-        activity.description
-      )
-    })
-
-    // Reload activities after adding mock data
-    setTimeout(async () => {
-      const recentActivities = await activityTracker.getRecentActivities(userId, 10)
-      setActivities(recentActivities)
-    }, 100)
-  }
+  }, [user?.id, currentWorkspace]) // Removed loadActivities from deps to prevent loops
 
   // Calculate agency metrics - use actual data where available
   const agencyMetrics = useMemo(() => {
@@ -302,7 +283,11 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border shadow-sm">
           <Users className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">{teamMemberCount} team member{teamMemberCount !== 1 ? 's' : ''}</span>
+          {loadingTeamMembers ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : (
+            <span className="text-sm font-medium">{teamMemberCount} team member{teamMemberCount !== 1 ? 's' : ''}</span>
+          )}
         </div>
       </div>
 
@@ -316,7 +301,13 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="text-2xl font-bold mb-1">{propertyCount}</div>
+            <div className="text-2xl font-bold mb-1">
+              {loadingProperties ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                propertyCount
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">Properties under management</p>
           </CardContent>
         </Card>
@@ -329,7 +320,13 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="text-2xl font-bold mb-1">{agencyMetrics?.totalLocations || 0}</div>
+            <div className="text-2xl font-bold mb-1">
+              {loadingLocations ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                agencyMetrics?.totalLocations || 0
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">Total locations managed</p>
           </CardContent>
         </Card>

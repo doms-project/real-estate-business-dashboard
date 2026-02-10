@@ -8,20 +8,20 @@ CREATE TABLE IF NOT EXISTS ghl_location_metrics (
   opportunities_count INTEGER DEFAULT 0,
   conversations_count INTEGER DEFAULT 0,
   health_score DECIMAL(5,2) DEFAULT 0,
-  last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_ghl_metrics_location_name ON ghl_location_metrics(location_name);
-CREATE INDEX IF NOT EXISTS idx_ghl_metrics_last_updated ON ghl_location_metrics(last_updated DESC);
+CREATE INDEX IF NOT EXISTS idx_ghl_metrics_updated_at ON ghl_location_metrics(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ghl_metrics_health_score ON ghl_location_metrics(health_score DESC);
 
--- Update trigger for last_updated
+-- Update trigger for updated_at
 CREATE OR REPLACE FUNCTION update_ghl_metrics_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW.last_updated = NOW();
+  NEW.updated_at = NOW();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -56,4 +56,4 @@ COMMENT ON COLUMN ghl_location_metrics.contacts_count IS 'Total contacts in this
 COMMENT ON COLUMN ghl_location_metrics.opportunities_count IS 'Total opportunities across all pipelines';
 COMMENT ON COLUMN ghl_location_metrics.conversations_count IS 'Total conversations in this location';
 COMMENT ON COLUMN ghl_location_metrics.health_score IS 'Calculated health score (0-100)';
-COMMENT ON COLUMN ghl_location_metrics.last_updated IS 'When data was last refreshed from GHL API';
+COMMENT ON COLUMN ghl_location_metrics.updated_at IS 'When data was last refreshed from GHL API';
