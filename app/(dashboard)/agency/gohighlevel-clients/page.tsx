@@ -141,6 +141,8 @@ export default function GHLClientsPage() {
     maxAttempts: 3
   })
 
+  const [apiProgress, setApiProgress] = useState({ completed: 0, total: 0, currentEndpoint: '' })
+
   // Retry counter for stuck loading states
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 3;
@@ -158,6 +160,7 @@ export default function GHLClientsPage() {
     setLocationsData(null);
     setLocationsLoading(true);
     setRetryCount(prev => prev + 1);
+    setApiProgress({ completed: 0, total: 0, currentEndpoint: '' });
 
     // Reset progress
     setLoadingProgress({
@@ -191,6 +194,7 @@ export default function GHLClientsPage() {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         setLocationsLoading(true)
+        setApiProgress({ completed: 1, total: 4, currentEndpoint: 'connecting to GHL' })
         setLoadingProgress({
           current: `Connecting to GoHighLevel... (Attempt ${attempt}/${maxRetries})`,
           completed: false,
@@ -205,6 +209,7 @@ export default function GHLClientsPage() {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
 
+        setApiProgress({ completed: 2, total: 4, currentEndpoint: 'fetching locations' })
         setLoadingProgress({
           current: `Fetching location data... (Attempt ${attempt}/${maxRetries})`,
           completed: false,
@@ -224,6 +229,7 @@ export default function GHLClientsPage() {
           throw new Error(`Server returned ${response.status}: ${response.statusText}`)
         }
 
+        setApiProgress({ completed: 3, total: 4, currentEndpoint: 'processing data' })
         setLoadingProgress({
           current: 'Processing location data...',
           completed: false,
@@ -236,6 +242,7 @@ export default function GHLClientsPage() {
         clearTimeout(timeoutId); // Safe to clear now
         console.log('📍 Dashboard - Locations response:', data)
 
+        setApiProgress({ completed: 4, total: 4, currentEndpoint: 'complete' })
         setLoadingProgress({
           current: 'Loading complete!',
           completed: true,
@@ -834,7 +841,27 @@ export default function GHLClientsPage() {
                 </span>
               </div>
 
-              {!loadingProgress.error && (
+              {!loadingProgress.error && apiProgress.total > 0 && (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-blue-700">
+                      {apiProgress.completed} / {apiProgress.total} steps completed
+                    </span>
+                    <span className="text-blue-600 font-medium">
+                      {Math.round((apiProgress.completed / apiProgress.total) * 100)}%
+                    </span>
+                  </div>
+                  <Progress
+                    value={(apiProgress.completed / apiProgress.total) * 100}
+                    className="h-2"
+                  />
+                  <p className="text-xs text-blue-600">
+                    Current: {apiProgress.currentEndpoint}...
+                  </p>
+                </>
+              )}
+
+              {!loadingProgress.error && apiProgress.total === 0 && (
                 <Progress
                   value={loadingProgress.completed ? 100 : 20 + (loadingProgress.attempt * 25)}
                   className="h-2"
