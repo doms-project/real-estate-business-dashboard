@@ -393,26 +393,33 @@ export const useBlops = (user: any) => {
   // Delete blop
   const deleteBlop = useCallback(async (blopId: string) => {
     if (confirm('Are you sure you want to delete this blop?')) {
-      // First, clean up connections that reference this blop
+      // Get blops that need connection cleanup before state update
+      const blopsToUpdate: { id: string, connections: Connection[] }[] = []
+
+      // Clean up connections in state and collect blops that need database updates
       setBlops(prev => prev.map(blop => {
         if (blop.id !== blopId && blop.connections) {
           // Remove any connections that point to the deleted blop
           const cleanedConnections = blop.connections.filter(conn => conn.targetId !== blopId)
           if (cleanedConnections.length !== blop.connections.length) {
-            // Update the blop in database if it's a custom blop
-            if (!blop.id.startsWith('location-')) {
-              // Update the blop with cleaned connections (don't await to avoid blocking)
-              fetch(`/api/blops/${blop.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ connections: cleanedConnections }),
-              }).catch(error => console.error('Failed to update connections after deletion:', error))
-            }
+            // Collect blop for database update (outside state updater)
+            blopsToUpdate.push({ id: blop.id, connections: cleanedConnections })
             return { ...blop, connections: cleanedConnections }
           }
         }
         return blop
       }))
+
+      // Update connections in database outside state updater
+      blopsToUpdate.forEach(({ id, connections }) => {
+        if (!id.startsWith('location-')) {
+          fetch(`/api/blops/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connections }),
+          }).catch(error => console.error('Failed to update connections after deletion:', error))
+        }
+      })
 
       // Then remove the blop itself
       setBlops(prev => prev.filter(blop => blop.id !== blopId))
@@ -432,7 +439,7 @@ export const useBlops = (user: any) => {
         }
       }
     }
-  }, [blops])
+  }, [])
 
   // Auto-arrange blops
   const autoArrange = useCallback(() => {
@@ -482,29 +489,35 @@ export const useBlops = (user: any) => {
       return blop
     }))
 
-    // Save to database
+    // Save to database - use functional update to get current connections
     if (!fromId.startsWith('location-')) {
-      try {
-        // Update the specific blop with new connections
-        const currentConnections = blops.find(blop => blop.id === fromId)?.connections || []
-        const updatedConnections = [...currentConnections, connection]
-
-        const response = await fetch(`/api/blops/${fromId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            connections: updatedConnections
-          }),
-        })
-
-        if (!response.ok) {
-          console.error('Failed to save connection:', await response.text())
+      // Get current connections using functional update pattern
+      let currentConnections: Connection[] = []
+      setBlops(prev => {
+        const blopToUpdate = prev.find(blop => blop.id === fromId)
+        if (blopToUpdate) {
+          currentConnections = blopToUpdate.connections || []
         }
-      } catch (error) {
+        return prev
+      })
+
+      // Save to database outside state updater
+      const updatedConnections = [...currentConnections, connection]
+      fetch(`/api/blops/${fromId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connections: updatedConnections
+        }),
+      }).then(response => {
+        if (!response.ok) {
+          console.error('Failed to save connection:', response.text())
+        }
+      }).catch(error => {
         console.error('Failed to save connection:', error)
-      }
+      })
     }
   }, [blops, saveCustomBlops])
 

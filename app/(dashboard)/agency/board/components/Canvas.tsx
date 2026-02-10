@@ -21,6 +21,7 @@ interface CanvasProps {
   onConnectionEnd?: (toId?: string) => void
   onHover?: (blopId: string | null) => void
   hoveredBlop?: string | null
+  sensors?: any
 }
 
 export const Canvas = ({
@@ -37,7 +38,8 @@ export const Canvas = ({
   onConnectionStart,
   onConnectionEnd,
   onHover,
-  hoveredBlop
+  hoveredBlop,
+  sensors
 }: CanvasProps) => {
   const { zoom, pan, showGrid, isPanning } = canvasState
 
@@ -58,7 +60,7 @@ export const Canvas = ({
       className={`flex-1 relative overflow-hidden bg-gray-50 ${isPanning ? 'cursor-grabbing' : canvasState.mode === 'connect' ? 'cursor-crosshair' : 'cursor-grab'}`}
       onMouseDown={onMouseDown}
     >
-      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div
           className="absolute inset-0 canvas-background select-none"
           style={{

@@ -166,18 +166,52 @@ export default function FlexboardPage() {
   }, [handleMouseMove, handleMouseUp])
 
   // Format blop data from realtime updates
-  const formatRealtimeBlop = (blopData: any) => ({
-    id: blopData.id,
-    x: blopData.x || 200,
-    y: blopData.y || 200,
-    shape: blopData.shape || "square",
-    color: blopData.color || "bg-blue-500",
-    title: blopData.title || blopData.content || "Untitled",
-    content: blopData.content || "",
-    type: blopData.type || "text",
-    status: blopData.status || "info",
-    connections: blopData.connections || [],
-  })
+  const formatRealtimeBlop = (blopData: any) => {
+    let connections = []
+    try {
+      if (Array.isArray(blopData.connections)) {
+        // Parse each JSON string in the array like formatBlopData does
+        const parsedConnections: any[] = []
+        for (const conn of blopData.connections) {
+          try {
+            if (typeof conn === 'string') {
+              const parsed = JSON.parse(conn)
+              // Validate that parsed connection has required fields
+              if (parsed && typeof parsed === 'object' && 'targetId' in parsed && 'type' in parsed) {
+                parsedConnections.push(parsed)
+              } else {
+                console.warn('Invalid connection format for realtime blop', blopData.id, ':', conn)
+              }
+            } else if (conn && typeof conn === 'object' && 'targetId' in conn && 'type' in conn) {
+              // Already parsed object
+              parsedConnections.push(conn)
+            } else {
+              console.warn('Invalid connection object for realtime blop', blopData.id, ':', conn)
+            }
+          } catch (e) {
+            console.error('Error parsing connection for realtime blop', blopData.id, ':', conn, e)
+          }
+        }
+        connections = parsedConnections
+      }
+    } catch (error) {
+      console.error('Error parsing connections array for realtime blop', blopData.id, ':', error)
+      connections = []
+    }
+
+    return {
+      id: blopData.id,
+      x: blopData.x || 200,
+      y: blopData.y || 200,
+      shape: blopData.shape || "square",
+      color: blopData.color || "bg-blue-500",
+      title: blopData.title || blopData.content || "Untitled",
+      content: blopData.content || "",
+      type: blopData.type || "text",
+      status: blopData.status || "info",
+      connections: connections,
+    }
+  }
 
   // Real-time blops updates
   useEffect(() => {
@@ -249,12 +283,12 @@ export default function FlexboardPage() {
         locationBlopsCount={blopCounts.locations}
         isConnecting={!!connectionStart}
         onStartConnectionMode={() => {
-          // Start connection mode by setting initial state
-          // User will click on first blop to start
+          startConnectionMode('reference')
         }}
         onCancelConnectionMode={() => {
           setConnectionStart(null)
           setHoveredBlop(null)
+          cancelConnectionMode()
         }}
       />
 
@@ -273,6 +307,7 @@ export default function FlexboardPage() {
           onConnectionEnd={handleConnectionEnd}
           onHover={setHoveredBlop}
           hoveredBlop={hoveredBlop}
+          sensors={sensors}
         />
     </div>
   )

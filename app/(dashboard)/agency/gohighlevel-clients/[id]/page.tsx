@@ -2253,7 +2253,7 @@ export default function LocationAnalyticsPage() {
       clearInterval(interval);
       console.log('🛑 Analytics auto-refresh stopped');
     };
-  }, [autoRefreshEnabled, refreshInterval, refreshFunnelAnalytics, funnelAnalytics]); // loadLocationData is stable
+  }, [autoRefreshEnabled, refreshInterval, refreshFunnelAnalytics]); // loadLocationData is stable - removed funnelAnalytics to prevent interval reset
 
   // Manual refresh function
   const handleManualRefresh = useCallback(async (cacheKey?: string, isAggregatedView?: boolean) => {
