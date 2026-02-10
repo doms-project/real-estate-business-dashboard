@@ -537,6 +537,7 @@ export default function GHLClientsPage() {
           console.log(`✅ Smart load completed: ${result.data.length} locations from ${result.source}`);
           console.log(`🕐 Data freshness: ${result.isStale ? 'STALE (refreshed)' : 'FRESH (from cache)'}`);
 
+          setLocationsLoading(false); // Clear loading state after successful completion
           return; // Success - exit retry loop
         } else {
           throw new Error(`Invalid response: ${JSON.stringify(result)}`);
