@@ -4,6 +4,8 @@ import { GHLClient } from '@/lib/ghl-client'
 import { auth } from '@clerk/nextjs/server'
 import { activityTracker } from '@/lib/activity-tracker'
 
+export const dynamic = 'force-dynamic'
+
 // Create Supabase client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

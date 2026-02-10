@@ -4,6 +4,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getUserWorkspaceRole, userHasWorkspaceAccess } from '@/lib/workspace-helpers'
 import { randomBytes } from 'crypto'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/workspace/invitations - Get workspace invitations
  */

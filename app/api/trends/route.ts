@@ -3,9 +3,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
+import { supabaseAdmin } from '@/lib/supabase'
 
 /**
  * GET /api/trends - Get trend analysis for locations
