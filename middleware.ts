@@ -18,6 +18,7 @@ export default authMiddleware({
     '/api/ghl/data', // Allow authenticated users to access GHL data
     '/api/ghl/locations', // Allow access to GHL locations
     '/api/ghl/metrics(.*)', // Allow access to metrics APIs
+    '/api/analytics/script', // Allow public access to analytics script for external websites
     '/api/ai/business-insights', // Allow access to AI business insights
   ],
   // Add clock skew tolerance (helps with minor time sync issues)
