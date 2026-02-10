@@ -4,6 +4,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getWorkspaceMembers, getUserWorkspaceRole, userHasWorkspaceAccess } from '@/lib/workspace-helpers'
 import { activityTracker } from '@/lib/activity-tracker'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/workspace/members - Get workspace members
  */

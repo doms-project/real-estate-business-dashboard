@@ -3,6 +3,8 @@ import { auth } from '@clerk/nextjs/server'
 import { activityTracker, ActivityType, VALID_ACTIVITY_TYPES } from '@/lib/activity-tracker'
 import { getUserWorkspaceRole } from '@/lib/workspace-helpers'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await auth()

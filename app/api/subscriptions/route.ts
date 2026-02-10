@@ -3,6 +3,8 @@ import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getOrCreateUserWorkspace, getUserWorkspaces } from '@/lib/workspace-helpers'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/subscriptions - Fetch workspace subscriptions
  */

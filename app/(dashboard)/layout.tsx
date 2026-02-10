@@ -20,13 +20,14 @@ export default function DashboardLayout({
   const [loadingTimeout, setLoadingTimeout] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // Show timeout message if Clerk takes too long (likely misconfigured)
+  // Show timeout message if Clerk takes too long (likely misconfigured or cached session issues)
   useEffect(() => {
+    // Increase timeout since cached sessions might take longer
     const timer = setTimeout(() => {
       if (!isLoaded) {
         setLoadingTimeout(true)
       }
-    }, 5000) // 5 second timeout
+    }, 10000) // 10 second timeout (increased from 5)
 
     return () => clearTimeout(timer)
   }, [isLoaded])
@@ -61,13 +62,37 @@ export default function DashboardLayout({
             {loadingTimeout ? (
               <div className="space-y-2">
                 <p>Loading is taking longer than expected...</p>
-                <p className="text-sm">Make sure Clerk is configured in .env.local</p>
-                <button
-                  onClick={() => router.push("/sign-in")}
-                  className="text-primary hover:underline text-sm"
-                >
-                  Go to Sign In →
-                </button>
+                {process.env.NODE_ENV === 'production' || !process.env.DISABLE_AUTH_REDIRECT ? (
+                  <>
+                    <p className="text-sm">Make sure Clerk is configured in .env.local</p>
+                    <button
+                      onClick={() => router.push("/sign-in")}
+                      className="text-primary hover:underline text-sm"
+                    >
+                      Go to Sign In →
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm">Auth redirects disabled - waiting for Clerk to load...</p>
+                    <button
+                      onClick={() => {
+                        // Clear Clerk-related localStorage and reload
+                        if (typeof window !== 'undefined') {
+                          Object.keys(localStorage).forEach(key => {
+                            if (key.startsWith('clerk-') || key.includes('clerk')) {
+                              localStorage.removeItem(key)
+                            }
+                          })
+                          window.location.reload()
+                        }
+                      }}
+                      className="text-orange-600 hover:underline text-sm mt-1"
+                    >
+                      Clear Cached Session & Reload
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               "Loading..."

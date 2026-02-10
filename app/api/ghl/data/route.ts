@@ -4,6 +4,8 @@ import { GHLClient } from '@/lib/ghl-client'
 import { createClient } from '@supabase/supabase-js'
 import { activityTracker } from '@/lib/activity-tracker'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   return handleRequest(request, 'GET');
 }

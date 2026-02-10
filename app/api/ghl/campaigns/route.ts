@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { activityTracker } from '@/lib/activity-tracker'
 
+export const dynamic = 'force-dynamic'
+
 // Get campaigns for a specific location
 export async function GET(request: NextRequest) {
   try {

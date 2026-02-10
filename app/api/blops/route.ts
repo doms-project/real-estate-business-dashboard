@@ -4,6 +4,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getOrCreateUserWorkspace, getUserWorkspaces } from '@/lib/workspace-helpers'
 import { activityTracker } from '@/lib/activity-tracker'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/blops - Fetch workspace blops
  */

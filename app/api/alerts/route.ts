@@ -3,9 +3,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { getActiveAlerts } from '@/lib/alert-system'
 
 export const dynamic = 'force-dynamic'
+import { getActiveAlerts } from '@/lib/alert-system'
 
 /**
  * GET /api/alerts - Get alerts for locations

@@ -3,6 +3,8 @@ import { auth } from '@clerk/nextjs/server'
 import { currentUser } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/workspace/invitations/pending - Get pending invitations for the current user
  */

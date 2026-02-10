@@ -4,6 +4,8 @@ import { currentUser } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getUserWorkspaceRole } from '@/lib/workspace-helpers'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * POST /api/workspace/invitations/accept - Accept an invitation
  */

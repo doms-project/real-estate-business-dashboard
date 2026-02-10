@@ -17,8 +17,13 @@ export function GoHighLevelButtonSidebar({ collapsed }: GoHighLevelButtonSidebar
     if (!isLoaded) return // Wait for auth to load
 
     if (!user) {
-      // Not logged in - redirect to sign in
-      router.push('/sign-in')
+      // Not logged in - only redirect if auth redirects are enabled
+      if (process.env.NODE_ENV === 'production' || !process.env.DISABLE_AUTH_REDIRECT) {
+        router.push('/sign-in')
+      } else {
+        // Auth redirects disabled - show GHL anyway or do nothing
+        window.open('http://app.gohighlevel.com/', '_blank')
+      }
     } else {
       // Logged in - go to GoHighLevel main app
       window.open('http://app.gohighlevel.com/', '_blank')
