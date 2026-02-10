@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 // Configure Clerk middleware for development and production
 export default authMiddleware({
   // Same authentication rules in development and production
-  publicRoutes: [
+  publicRoutes: process.env.BYPASS_AUTH_FOR_TESTING === 'true' ? [
+    // Make everything public for testing when bypass is enabled
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)'
+  ] : [
     '/sign-in',
     '/sign-up',
     '/',
