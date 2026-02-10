@@ -45,6 +45,9 @@ export default function AgencyPage() {
   const [flexboardStats, setFlexboardStats] = useState({ boards: 1, widgets: 0 })
   const [subscriptionStats, setSubscriptionStats] = useState({ count: 0, revenue: 0 })
   const [loading, setLoading] = useState(true)
+  const [loadingSubscriptions, setLoadingSubscriptions] = useState(true)
+  const [loadingFlexboard, setLoadingFlexboard] = useState(true)
+  const [loadingHealth, setLoadingHealth] = useState(true)
 
   // Load data from database - extracted as reusable function
   const loadData = useCallback(async () => {
@@ -102,15 +105,19 @@ export default function AgencyPage() {
 
       // Load health data
       try {
+        setLoadingHealth(true)
         const healthResponse = await fetch('/api/health')
         const healthResult = await healthResponse.json()
         setHealthData(healthResult)
       } catch (error) {
         console.error('Failed to load health data:', error)
+      } finally {
+        setLoadingHealth(false)
       }
 
       // Load subscription data
       try {
+        setLoadingSubscriptions(true)
         const subscriptionsResponse = await fetch('/api/subscriptions')
         if (subscriptionsResponse.ok) {
           const subscriptionsData = await subscriptionsResponse.json()
@@ -126,11 +133,14 @@ export default function AgencyPage() {
       } catch (error) {
         console.error('Failed to load subscription data:', error)
         // Keep default values
+      } finally {
+        setLoadingSubscriptions(false)
       }
 
       // Load Flexboard stats (if user is logged in)
       if (user) {
         try {
+          setLoadingFlexboard(true)
           const blopsResponse = await fetch('/api/blops')
           if (blopsResponse.ok) {
             const blopsData = await blopsResponse.json()
@@ -142,7 +152,11 @@ export default function AgencyPage() {
         } catch (error) {
           console.error('Failed to load Flexboard stats:', error)
           // Keep default values
+        } finally {
+          setLoadingFlexboard(false)
         }
+      } else {
+        setLoadingFlexboard(false)
       }
 
       setLoading(false)
@@ -170,7 +184,7 @@ export default function AgencyPage() {
     return () => {
       window.removeEventListener('bulkRefreshCompleted', handleBulkRefresh as EventListener)
     }
-  }, [])
+  }, [loadData])
 
   // Listen for subscription updates
   useEffect(() => {
@@ -178,6 +192,7 @@ export default function AgencyPage() {
       // Reload subscription data when subscriptions are updated
       const loadSubscriptionData = async () => {
         try {
+          setLoadingSubscriptions(true)
           const subscriptionsResponse = await fetch('/api/subscriptions')
           if (subscriptionsResponse.ok) {
             const subscriptionsData = await subscriptionsResponse.json()
@@ -192,6 +207,8 @@ export default function AgencyPage() {
           }
         } catch (error) {
           console.error('Failed to reload subscription data:', error)
+        } finally {
+          setLoadingSubscriptions(false)
         }
       }
       loadSubscriptionData()
@@ -216,7 +233,7 @@ export default function AgencyPage() {
     return () => {
       window.removeEventListener('websitesUpdated', handleWebsiteUpdate)
     }
-  }, [])
+  }, [loadData])
 
   useEffect(() => {
     if (user) {
@@ -286,7 +303,11 @@ export default function AgencyPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Agency Overview</h1>
           <p className="text-muted-foreground">
-            Real-time insights across all {agencyMetrics?.totalLocations || 0} locations
+            Real-time insights across all {loading ? (
+              <Loader2 className="inline h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (
+              `${agencyMetrics?.totalLocations || 0}`
+            )} locations
           </p>
         </div>
       </div>
@@ -310,11 +331,23 @@ export default function AgencyPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Active Plans</span>
-                  <span className="font-medium">{subscriptionStats.count}</span>
+                  <span className="font-medium">
+                    {loadingSubscriptions ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      subscriptionStats.count
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Monthly Revenue</span>
-                  <span className="font-medium text-green-600">${subscriptionStats.revenue.toFixed(2)}</span>
+                  <span className="font-medium text-green-600">
+                    {loadingSubscriptions ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      `$${subscriptionStats.revenue.toFixed(2)}`
+                    )}
+                  </span>
                 </div>
               </div>
             </CardContent>
@@ -337,11 +370,23 @@ export default function AgencyPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Active Dashboards</span>
-                  <span className="font-medium">{flexboardStats.boards}</span>
+                  <span className="font-medium">
+                    {loadingFlexboard ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      flexboardStats.boards
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Status Monitors</span>
-                  <span className="font-medium text-purple-600">{flexboardStats.widgets}</span>
+                  <span className="font-medium text-purple-600">
+                    {loadingFlexboard ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      flexboardStats.widgets
+                    )}
+                  </span>
                 </div>
               </div>
             </CardContent>
@@ -364,11 +409,23 @@ export default function AgencyPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Live Sites</span>
-                  <span className="font-medium">{agencyMetrics?.liveSites || 0}</span>
+                  <span className="font-medium">
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      agencyMetrics?.liveSites || 0
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Domains</span>
-                  <span className="font-medium text-blue-600">{agencyMetrics?.domains || 0}</span>
+                  <span className="font-medium text-blue-600">
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      agencyMetrics?.domains || 0
+                    )}
+                  </span>
                 </div>
               </div>
             </CardContent>
@@ -391,7 +448,13 @@ export default function AgencyPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Active Integrations</span>
-                  <span className="font-medium">{healthData?.checks?.integrations ? `${healthData.checks.integrations.count} of ${healthData.checks.integrations.total}` : '2'}</span>
+                  <span className="font-medium">
+                    {loadingHealth ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      healthData?.checks?.integrations ? `${healthData.checks.integrations.count} of ${healthData.checks.integrations.total}` : '2'
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>System Health</span>
@@ -399,7 +462,11 @@ export default function AgencyPage() {
                     healthData?.overallHealth?.status === 'healthy' ? 'text-green-600' :
                     healthData?.overallHealth?.status === 'warning' ? 'text-yellow-600' : 'text-red-600'
                   }`}>
-                    {healthData?.overallHealth?.score || 98}%
+                    {loadingHealth ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      `${healthData?.overallHealth?.score || 98}%`
+                    )}
                   </span>
                 </div>
               </div>
@@ -423,11 +490,23 @@ export default function AgencyPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Total Locations</span>
-                  <span className="font-medium">{agencyMetrics?.locationsData?.length || 0}</span>
+                  <span className="font-medium">
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      agencyMetrics?.locationsData?.length || 0
+                    )}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Active Clients</span>
-                  <span className="font-medium text-green-600">{agencyMetrics?.activeClients || 0}</span>
+                  <span className="font-medium text-green-600">
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      agencyMetrics?.activeClients || 0
+                    )}
+                  </span>
                 </div>
               </div>
             </CardContent>

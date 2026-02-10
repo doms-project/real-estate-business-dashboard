@@ -38,6 +38,149 @@ CREATE POLICY "Users can update their own profile"
   USING (auth.uid()::text = id);
 
 -- ============================================
+-- GHL LOCATION METRICS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS ghl_location_metrics (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id TEXT NOT NULL UNIQUE,
+  location_name TEXT NOT NULL,
+  contacts_count INTEGER DEFAULT 0,
+  opportunities_count INTEGER DEFAULT 0,
+  conversations_count INTEGER DEFAULT 0,
+  health_score DECIMAL(5,2),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for GHL location metrics
+CREATE INDEX IF NOT EXISTS idx_ghl_location_metrics_location_id ON ghl_location_metrics(location_id);
+CREATE INDEX IF NOT EXISTS idx_ghl_location_metrics_updated_at ON ghl_location_metrics(updated_at DESC);
+
+-- Disable RLS for internal system table (managed by service role only)
+ALTER TABLE ghl_location_metrics DISABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- GHL LOCATIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS ghl_locations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for GHL locations
+CREATE INDEX IF NOT EXISTS idx_ghl_locations_is_active ON ghl_locations(is_active);
+
+-- Disable RLS for internal system table (managed by service role only)
+ALTER TABLE ghl_locations DISABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- BUSINESS HUB TABLES
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS businesses (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  type TEXT DEFAULT 'marketing', -- 'marketing', 'real_estate', 'church', etc.
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for businesses
+CREATE INDEX IF NOT EXISTS idx_businesses_user_id ON businesses(user_id);
+CREATE INDEX IF NOT EXISTS idx_businesses_type ON businesses(type);
+
+-- Enable RLS for businesses
+ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for businesses
+CREATE POLICY "Users can view their own businesses"
+  ON businesses FOR SELECT
+  USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can insert their own businesses"
+  ON businesses FOR INSERT
+  WITH CHECK (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can update their own businesses"
+  ON businesses FOR UPDATE
+  USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can delete their own businesses"
+  ON businesses FOR DELETE
+  USING (auth.uid()::text = user_id);
+
+-- ============================================
+-- CAMPAIGNS TABLE
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS campaigns (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  ghl_campaign_id TEXT, -- NULL for custom campaigns not from GHL
+  name TEXT NOT NULL,
+  status TEXT DEFAULT 'draft', -- 'draft', 'active', 'paused', 'completed'
+  platform TEXT DEFAULT 'manual', -- 'ghl', 'facebook', 'google', 'manual', etc.
+
+  -- Financial data (user-editable)
+  budget DECIMAL(10,2),
+  spent DECIMAL(10,2),
+  currency TEXT DEFAULT 'USD',
+
+  -- Performance metrics (from platforms or manual entry)
+  impressions INTEGER DEFAULT 0,
+  clicks INTEGER DEFAULT 0,
+  conversions INTEGER DEFAULT 0,
+
+  -- Calculated metrics
+  ctr DECIMAL(7,4) DEFAULT 0, -- Click-through rate (as percentage: 0.0000 to 999.9999)
+  cpc DECIMAL(8,4) DEFAULT 0, -- Cost per click
+  cpa DECIMAL(8,4) DEFAULT 0, -- Cost per acquisition
+  roas DECIMAL(6,2) DEFAULT 0, -- Return on ad spend
+
+  -- Additional data
+  start_date DATE,
+  end_date DATE,
+  target_audience TEXT,
+  notes TEXT,
+
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for campaigns
+CREATE INDEX IF NOT EXISTS idx_campaigns_business_id ON campaigns(business_id);
+CREATE INDEX IF NOT EXISTS idx_campaigns_user_id ON campaigns(user_id);
+CREATE INDEX IF NOT EXISTS idx_campaigns_ghl_campaign_id ON campaigns(ghl_campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_campaigns_platform ON campaigns(platform);
+
+-- Enable RLS for campaigns
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for campaigns
+CREATE POLICY "Users can view their own campaigns"
+  ON campaigns FOR SELECT
+  USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can insert their own campaigns"
+  ON campaigns FOR INSERT
+  WITH CHECK (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can update their own campaigns"
+  ON campaigns FOR UPDATE
+  USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can delete their own campaigns"
+  ON campaigns FOR DELETE
+  USING (auth.uid()::text = user_id);
+
+-- ============================================
 -- USER PROFILE SYNC FUNCTION
 -- ============================================
 CREATE OR REPLACE FUNCTION sync_user_profile(
@@ -75,6 +218,8 @@ CREATE TABLE IF NOT EXISTS pit_token_failures (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+ALTER TABLE pit_token_failures DISABLE ROW LEVEL SECURITY;
+
 -- Indexes for PIT token failures
 CREATE INDEX IF NOT EXISTS idx_pit_token_failures_location_id ON pit_token_failures(location_id);
 CREATE INDEX IF NOT EXISTS idx_pit_token_failures_resolved ON pit_token_failures(resolved);
@@ -91,7 +236,8 @@ CREATE TABLE blops (
   y FLOAT NOT NULL,
   shape TEXT NOT NULL CHECK (shape IN ('circle', 'square', 'pill', 'diamond')),
   color TEXT NOT NULL,
-  content TEXT NOT NULL,
+  title TEXT, -- Blop title/name
+  content TEXT NOT NULL, -- Blop description/content
   type TEXT NOT NULL CHECK (type IN ('text', 'link', 'url', 'file', 'image', 'embed')),
   tags TEXT[], -- Array of tags
   connections TEXT[], -- Array of connected blop IDs

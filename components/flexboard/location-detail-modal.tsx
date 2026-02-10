@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -47,13 +47,7 @@ export function LocationDetailModal({ isOpen, onClose, locationId, healthData }:
   const [detailedData, setDetailedData] = useState<DetailedMetrics | null>(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    if (isOpen && locationId) {
-      loadDetailedData()
-    }
-  }, [isOpen, locationId])
-
-  const loadDetailedData = async () => {
+  const loadDetailedData = useCallback(async () => {
     setLoading(true)
     try {
       // Load comprehensive data for this location with error handling
@@ -105,7 +99,13 @@ export function LocationDetailModal({ isOpen, onClose, locationId, healthData }:
     } finally {
       setLoading(false)
     }
-  }
+  }, [locationId, setDetailedData, setLoading, healthData])
+
+  useEffect(() => {
+    if (isOpen && locationId) {
+      loadDetailedData()
+    }
+  }, [isOpen, locationId, loadDetailedData])
 
   if (!detailedData && !loading) return null
 

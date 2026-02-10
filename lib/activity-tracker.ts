@@ -47,6 +47,40 @@ export type ActivityType =
   | 'ghl_metrics_refreshed'
   | 'ghl_api_error'
 
+export const VALID_ACTIVITY_TYPES: ActivityType[] = [
+  'website_added',
+  'website_updated',
+  'website_deleted',
+  'subscription_updated',
+  'blop_created',
+  'blop_updated',
+  'blop_deleted',
+  'property_added',
+  'property_updated',
+  'property_deleted',
+  'maintenance_request_added',
+  'maintenance_request_updated',
+  'maintenance_request_deleted',
+  'location_added',
+  'location_updated',
+  'client_added',
+  'client_updated',
+  'ghl_sync',
+  'ghl_location_changed',
+  'ghl_contact_added',
+  'ghl_opportunity_created',
+  'settings_updated',
+  'team_member_added',
+  'team_member_role_updated',
+  'photos_uploaded',
+  'document_uploaded',
+  'ghl_location_added',
+  'ghl_campaigns_fetched',
+  'ghl_metrics_accessed',
+  'ghl_metrics_refreshed',
+  'ghl_api_error'
+]
+
 // In-memory storage (in production, this would be a database)
 const activities: Activity[] = []
 const MAX_ACTIVITIES = 100 // Keep only the most recent 100 activities
@@ -98,7 +132,7 @@ class ActivityTracker {
         .from('activities')
         .insert({
           user_id: userId,
-          workspace_id: workspaceId,
+          workspace_id: targetWorkspaceId,
           type,
           title,
           description,

@@ -78,7 +78,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { blops, workspaceId } = body
+    const { blops, workspaceId, incremental, skipActivityLog } = body
+
 
     if (!Array.isArray(blops)) {
       return NextResponse.json(
@@ -91,11 +92,15 @@ export async function POST(request: NextRequest) {
     const workspace = await getOrCreateUserWorkspace(userId)
     const targetWorkspaceId = workspaceId || workspace.id
 
-    // Delete existing blops for this workspace
-    const { error: deleteError } = await supabaseAdmin
-      .from('blops')
-      .delete()
-      .eq('workspace_id', targetWorkspaceId)
+    // Only delete existing blops if this is NOT an incremental save
+    let deleteError = null
+    if (!incremental) {
+      const deleteResult = await supabaseAdmin
+        .from('blops')
+        .delete()
+        .eq('workspace_id', targetWorkspaceId)
+      deleteError = deleteResult.error
+    }
 
     if (deleteError) {
       console.error('Error deleting existing blops:', deleteError)
@@ -117,17 +122,22 @@ export async function POST(request: NextRequest) {
       y: blop.y,
       shape: blop.shape,
       color: blop.color,
+      title: blop.title || null,
       content: blop.content,
       type: blop.type,
       tags: blop.tags || null,
       connections: blop.connections || null,
     }))
 
-    const { data, error: insertError } = await supabaseAdmin
-      .from('blops')
-      .insert(blopsToInsert)
-      .select()
-
+    const { data, error: insertError } = incremental
+      ? await supabaseAdmin
+          .from('blops')
+          .upsert(blopsToInsert, { onConflict: 'id' })
+          .select()
+      : await supabaseAdmin
+          .from('blops')
+          .insert(blopsToInsert)
+          .select()
     if (insertError) {
       console.error('Error inserting blops:', insertError)
       return NextResponse.json(
@@ -136,10 +146,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Log activity for new blops
-    data.forEach((blop: any) => {
-      activityTracker.logBlopCreated(userId, blop.content || 'Untitled Blop', targetWorkspaceId)
-    })
+    // Log activity for new blops (only for non-incremental saves and when not skipped)
+    if (!incremental && !skipActivityLog) {
+      try {
+        await Promise.all(data.map((blop: any) =>
+          activityTracker.logBlopCreated(userId, blop.content || 'Untitled Blop', targetWorkspaceId)
+        ))
+      } catch (activityError) {
+        console.error('Failed to log blop creation activities:', activityError)
+        // Don't fail the main operation if activity logging fails
+      }
+    }
 
     return NextResponse.json({
       success: true,

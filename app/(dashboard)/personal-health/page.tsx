@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,12 +84,7 @@ export default function HealthPage() {
   })
   const { toast } = useToast()
 
-  // Fetch data on mount
-  useEffect(() => {
-    fetchData()
-  }, [])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [tasksRes, habitsRes, goalsRes] = await Promise.all([
         fetch('/api/personal-health/tasks'),
@@ -116,7 +111,12 @@ export default function HealthPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [setTasks, setHabits, setGoals, setLoading, toast])
+
+  // Fetch data on mount
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
   const toggleTask = async (taskId: string, currentCompleted: boolean) => {
     try {

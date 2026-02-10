@@ -1,8 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { globalAIState } from '@/lib/ai-coach/global-ai-state'
+
+// OpenRouter API types
+interface OpenRouterMessage {
+  role: "user" | "assistant" | "system"
+  content: string
+}
+
+interface OpenRouterRequest {
+  model: string
+  messages: OpenRouterMessage[]
+  temperature?: number
+  max_tokens?: number
+}
+
+interface OpenRouterResponse {
+  choices: Array<{
+    message: {
+      content: string
+    }
+  }>
+}
+
+// OpenRouter API client
+async function callOpenRouter(model: string, messages: OpenRouterMessage[]): Promise<string> {
+  const openRouterKey = process.env.OPENROUTER_API_KEY
+  if (!openRouterKey) {
+    throw new Error('OpenRouter API key not configured')
+  }
+
+  const request: OpenRouterRequest = {
+    model,
+    messages,
+    temperature: 0.7,
+    max_tokens: 1500
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${openRouterKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+      'X-Title': 'Real Estate Property Insights'
+    },
+    body: JSON.stringify(request)
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }))
+    throw new Error(`OpenRouter API error: ${errorData.error?.message || response.statusText}`)
+  }
+
+  const data: OpenRouterResponse = await response.json()
+  return data.choices[0]?.message?.content || 'No response generated'
+}
 
 interface Property {
   id: string
@@ -145,7 +201,9 @@ export async function POST(request: NextRequest) {
       insights,
       source: 'ai',
       cached: false,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      provider: 'openrouter', // Default to OpenRouter since it's tried first
+      model: 'openrouter/free'
     })
 
   } catch (error: any) {
@@ -178,14 +236,78 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Generate AI-powered insights using Gemini with rate limiting
+// Generate AI-powered insights using multi-model fallback with free models as default
 async function generateAIInsights(properties: Property[], metrics: PortfolioMetrics, style: string = 'balanced'): Promise<string> {
   // Use global AI state to coordinate requests
   return await globalAIState.makeAIRequest('properties-insights', async () => {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" })
+    let providerUsed = 'openrouter'
+    let modelUsed = 'openrouter/free'
 
-    const portfolioSummary = `
+    // Try OpenRouter free models first (user preference for free models)
+    try {
+      console.log('🤖 Trying OpenRouter free models first...')
+      const messages: OpenRouterMessage[] = [
+        {
+          role: "system",
+          content: `You are an expert real estate investment advisor. Provide specific, actionable insights based on the property portfolio data. Focus on profitability, risk management, and growth opportunities. Be concise but informative.`
+        },
+        {
+          role: "user",
+          content: getAnalysisPrompt(properties, metrics, style)
+        }
+      ]
+
+      const result = await callOpenRouter('openrouter/free', messages)
+      console.log('✅ OpenRouter free model succeeded')
+      return result
+
+    } catch (openRouterError: unknown) {
+      const errorMessage = openRouterError instanceof Error ? openRouterError.message : String(openRouterError)
+      console.log(`⚠️ OpenRouter failed: ${errorMessage}`)
+
+      // Check if it's a rate limit or quota error
+      const isRateLimit = errorMessage.toLowerCase().includes('429') ||
+                         errorMessage.toLowerCase().includes('quota') ||
+                         errorMessage.toLowerCase().includes('rate limit') ||
+                         errorMessage.toLowerCase().includes('too many requests')
+
+      if (isRateLimit && process.env.GEMINI_API_KEY) {
+        console.log('🔄 OpenRouter rate limited, trying Gemini fallback...')
+        providerUsed = 'gemini'
+        modelUsed = 'gemini-2.0-flash-lite'
+        // Fall through to Gemini
+      } else {
+        // Re-throw non-rate-limit errors
+        throw openRouterError
+      }
+    }
+
+    // Try Gemini as fallback
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        console.log('🤖 Trying Gemini fallback...')
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" })
+
+        const prompt = getAnalysisPrompt(properties, metrics, style)
+        const result = await model.generateContent(prompt)
+        const response = await result.response
+        console.log('✅ Gemini fallback succeeded')
+        return response.text()
+      } catch (geminiError: unknown) {
+        const errorMessage = geminiError instanceof Error ? geminiError.message : String(geminiError)
+        console.log(`❌ Both OpenRouter and Gemini failed: ${errorMessage}`)
+        throw geminiError
+      }
+    }
+
+    throw new Error('No AI providers available')
+  })
+}
+
+// Helper function to generate the analysis prompt
+function getAnalysisPrompt(properties: Property[], metrics: PortfolioMetrics, style: string): string {
+  const portfolioSummary = `
 Portfolio Overview:
 - ${metrics.totalProperties} total properties
 - Total estimated value: $${metrics.totalEstValue.toLocaleString()}
@@ -203,7 +325,7 @@ ${properties.map(p => `
 `).join('')}
 `
 
-    const stylePrompts = {
+  const stylePrompts = {
     conservative: `You are a conservative real estate investment advisor. Focus on risk mitigation, stable cash flow, and preserving capital. Prioritize low-risk strategies and caution against aggressive moves.`,
     balanced: `You are a balanced real estate investment advisor. Focus on steady growth, moderate risk strategies, and sustainable portfolio improvement.`,
     aggressive: `You are an aggressive real estate investment advisor. Focus on high-growth opportunities, leverage strategies, and maximizing returns even with higher risk.`,
@@ -213,7 +335,7 @@ ${properties.map(p => `
 
   const styleContext = stylePrompts[style as keyof typeof stylePrompts] || stylePrompts.balanced
 
-    const prompt = `${styleContext}
+  return `${styleContext}
 
 Analyze this property portfolio and provide 4-6 specific, actionable insights to improve profitability and portfolio performance.
 
@@ -223,9 +345,4 @@ Please provide insights in the following format:
 1. **Title of Insight** - Brief description with specific numbers and actionable recommendations.
 
 Be specific with numbers, prioritize high-impact recommendations, and make suggestions actionable. Keep insights concise but informative.`
-
-    const result = await model.generateContent(prompt)
-    const response = await result.response
-    return response.text()
-  })
 }

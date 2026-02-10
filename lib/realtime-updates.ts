@@ -11,7 +11,8 @@ const UPDATE_CONFIG = {
   cacheCleanupInterval: 30 * 60 * 1000, // 30 minutes
   maxCacheAge: 60 * 60 * 1000, // 1 hour
   realtimeEnabled: true,
-  locationMetricsRealtimeEnabled: true // Enable real-time updates for location metrics
+  locationMetricsRealtimeEnabled: true, // Enable real-time updates for location metrics
+  blopsRealtimeEnabled: true // Enable real-time updates for blops
 }
 
 // Active subscriptions and timers
@@ -39,7 +40,7 @@ export function initializeRealtimeUpdates() {
 
 // Subscribe to real-time updates for specific data types
 export function subscribeToUpdates(
-  dataType: 'health_scores' | 'alerts' | 'forecasts' | 'trends' | 'location_metrics' | 'activities' | 'workspaces' | 'workspace_requests',
+  dataType: 'health_scores' | 'alerts' | 'forecasts' | 'trends' | 'location_metrics' | 'activities' | 'workspaces' | 'workspace_requests' | 'blops',
   callback: (data: any) => void
 ): () => void {
   if (!subscribers.has(dataType)) {
@@ -370,6 +371,67 @@ function setupRealtimeSubscriptions() {
       })
   } catch (error) {
     console.error('❌ Failed to set up workspaces real-time subscription:', error)
+  }
+
+  // Subscribe to blops changes for real-time blop updates
+  if (UPDATE_CONFIG.blopsRealtimeEnabled) {
+    console.log('📌 Setting up blops real-time subscription...')
+
+    try {
+      supabase
+        .channel('blops_realtime')
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'blops'
+        }, (payload) => {
+          console.log('📌 New blop added:', payload.new)
+          notifySubscribers('blops', {
+            type: 'blop_created',
+            data: payload.new,
+            timestamp: new Date().toISOString()
+          })
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'blops'
+        }, (payload) => {
+          console.log('📌 Blop updated:', payload.new)
+          notifySubscribers('blops', {
+            type: 'blop_updated',
+            data: payload.new,
+            timestamp: new Date().toISOString()
+          })
+        })
+        .on('postgres_changes', {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'blops'
+        }, (payload) => {
+          console.log('📌 Blop deleted:', payload.old)
+          notifySubscribers('blops', {
+            type: 'blop_deleted',
+            data: payload.old,
+            timestamp: new Date().toISOString()
+          })
+        })
+        .subscribe((status, err) => {
+          console.log('📌 Blops subscription status:', status)
+          if (err) {
+            console.error('❌ Blops subscription error:', err)
+          }
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Successfully subscribed to blops real-time updates')
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Blops subscription failed - check Supabase RLS policies')
+          } else if (status === 'TIMED_OUT') {
+            console.error('❌ Blops subscription timed out')
+          }
+        })
+    } catch (error) {
+      console.error('❌ Failed to set up blops real-time subscription:', error)
+    }
   }
 }
 }

@@ -77,23 +77,23 @@ export function GHLClientCard({ client, metrics, onEdit }: GHLClientCardProps) {
               <div className="flex items-center gap-2">
                 <Eye className="h-4 w-4 text-muted-foreground" />
                 <div>
-                  <div className="text-lg font-semibold">{metrics.currentWeek.views.toLocaleString()}</div>
+                  <div className="text-lg font-semibold">{metrics.currentWeek?.views?.toLocaleString() || '0'}</div>
                   <div className="text-xs text-muted-foreground">Views</div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <UserPlus className="h-4 w-4 text-muted-foreground" />
                 <div>
-                  <div className="text-lg font-semibold">{metrics.currentWeek.leads}</div>
+                  <div className="text-lg font-semibold">{metrics.currentWeek?.leads || '0'}</div>
                   <div className="text-xs text-muted-foreground">Leads</div>
                 </div>
               </div>
             </div>
-            {metrics.currentWeek.revenue && (
+            {metrics.currentWeek?.revenue && (
               <div className="flex items-center gap-2 pt-2 border-t">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 <div>
-                  <div className="text-lg font-semibold">${metrics.currentWeek.revenue.toLocaleString()}</div>
+                  <div className="text-lg font-semibold">${metrics.currentWeek?.revenue?.toLocaleString() || '0'}</div>
                   <div className="text-xs text-muted-foreground">Revenue</div>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -37,7 +37,7 @@ export function PitTokenManager() {
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
 
-  const loadFailedTokens = async () => {
+  const loadFailedTokens = useCallback(async () => {
     if (!isLoaded || !user) {
       console.log('PitTokenManager: Waiting for authentication...')
       return
@@ -53,7 +53,7 @@ export function PitTokenManager() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [isLoaded, user, setLoading, setFailedTokens])
 
   const updateToken = async (locationId: string, token: string) => {
     if (!user) {
@@ -90,7 +90,7 @@ export function PitTokenManager() {
 
   useEffect(() => {
     loadFailedTokens()
-  }, [isLoaded, user])
+  }, [isLoaded, user, loadFailedTokens])
 
   // Also check sessionStorage for client-side detected failures
   useEffect(() => {

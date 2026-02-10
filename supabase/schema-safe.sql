@@ -6,6 +6,45 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================
+-- GHL LOCATION METRICS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS ghl_location_metrics (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  location_id TEXT NOT NULL UNIQUE,
+  location_name TEXT NOT NULL,
+  contacts_count INTEGER DEFAULT 0,
+  opportunities_count INTEGER DEFAULT 0,
+  conversations_count INTEGER DEFAULT 0,
+  health_score DECIMAL(5,2),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for GHL location metrics
+CREATE INDEX IF NOT EXISTS idx_ghl_location_metrics_location_id ON ghl_location_metrics(location_id);
+CREATE INDEX IF NOT EXISTS idx_ghl_location_metrics_updated_at ON ghl_location_metrics(updated_at DESC);
+
+-- Disable RLS for internal system table (managed by service role only)
+ALTER TABLE ghl_location_metrics DISABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- GHL LOCATIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS ghl_locations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for GHL locations
+CREATE INDEX IF NOT EXISTS idx_ghl_locations_is_active ON ghl_locations(is_active);
+
+-- Disable RLS for internal system table (managed by service role only)
+ALTER TABLE ghl_locations DISABLE ROW LEVEL SECURITY;
+
+-- ============================================
 -- BLOPS TABLE (Flexboard items)
 -- ============================================
 CREATE TABLE IF NOT EXISTS blops (
@@ -16,7 +55,8 @@ CREATE TABLE IF NOT EXISTS blops (
   y FLOAT NOT NULL,
   shape TEXT NOT NULL CHECK (shape IN ('circle', 'square', 'pill', 'diamond')),
   color TEXT NOT NULL,
-  content TEXT NOT NULL,
+  title TEXT, -- Blop title/name
+  content TEXT NOT NULL, -- Blop description/content
   type TEXT NOT NULL CHECK (type IN ('text', 'link', 'url', 'file', 'image', 'embed')),
   tags TEXT[], -- Array of tags
   connections TEXT[], -- Array of connected blop IDs

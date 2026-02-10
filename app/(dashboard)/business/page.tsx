@@ -11,8 +11,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
-import { TrendingUp, DollarSign, Users, Target, Plus, Trash2, Megaphone } from "lucide-react"
-import { useState } from "react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { TrendingUp, DollarSign, Users, Target, Plus, Trash2, RefreshCw, Edit, Save, X } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useUser } from "@clerk/nextjs"
 
 interface Campaign {
   id: string
@@ -24,169 +26,522 @@ interface Campaign {
   clicks: string
   conversions: string
   roas: string
+  business_id?: string
+  user_id?: string
+  ghl_campaign_id?: string
+  platform?: string
+  currency?: string
+  ctr?: number
+  cpc?: number
+  cpa?: number
+  start_date?: string
+  end_date?: string
+  target_audience?: string
+  notes?: string
+  created_at?: string
+  updated_at?: string
 }
 
 interface Business {
   id: string
+  user_id: string
   name: string
+  description?: string
+  type: string
   campaigns: Campaign[]
+  created_at: string
+  updated_at: string
+}
+
+interface EditableCampaign extends Campaign {
+  // Additional properties for editing
+  isEditing?: boolean
+  originalData?: Partial<EditableCampaign>
+}
+
+interface EditableBusiness extends Omit<Business, 'campaigns'> {
+  campaigns: EditableCampaign[]
 }
 
 export default function BusinessPage() {
-  const [businesses, setBusinesses] = useState<Business[]>([
-    {
-      id: "1",
-      name: "Church Track",
-      campaigns: [
-        {
-          id: "1",
-          name: "Sunday Service Promotion",
-          status: "Active",
-          budget: "$2,500",
-          spent: "$1,850",
-          impressions: "45,230",
-          clicks: "1,234",
-          conversions: "89",
-          roas: "3.2x",
-        },
-        {
-          id: "2",
-          name: "Community Outreach",
-          status: "Active",
-          budget: "$1,800",
-          spent: "$1,200",
-          impressions: "32,150",
-          clicks: "890",
-          conversions: "45",
-          roas: "2.8x",
-        },
-        {
-          id: "3",
-          name: "Youth Program Campaign",
-          status: "Paused",
-          budget: "$1,200",
-          spent: "$450",
-          impressions: "18,900",
-          clicks: "567",
-          conversions: "23",
-          roas: "2.1x",
-        },
-      ],
-    },
-    {
-      id: "2",
-      name: "Real Estate and Marketing Agency",
-      campaigns: [
-        {
-          id: "4",
-          name: "Property Listings Ads",
-          status: "Active",
-          budget: "$5,000",
-          spent: "$3,200",
-          impressions: "125,450",
-          clicks: "3,456",
-          conversions: "156",
-          roas: "4.5x",
-        },
-        {
-          id: "5",
-          name: "Lead Generation Campaign",
-          status: "Active",
-          budget: "$4,500",
-          spent: "$2,800",
-          impressions: "98,230",
-          clicks: "2,890",
-          conversions: "134",
-          roas: "3.9x",
-        },
-        {
-          id: "6",
-          name: "Brand Awareness",
-          status: "Active",
-          budget: "$3,000",
-          spent: "$1,950",
-          impressions: "156,780",
-          clicks: "4,123",
-          conversions: "78",
-          roas: "2.5x",
-        },
-      ],
-    },
-  ])
+  const { user } = useUser()
+  const [churchBusiness, setChurchBusiness] = useState<EditableBusiness | null>(null)
+  const [realEstateBusiness, setRealEstateBusiness] = useState<EditableBusiness | null>(null)
+  const [marketingBusiness, setMarketingBusiness] = useState<EditableBusiness | null>(null)
+  const [kpis, setKpis] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [autoSaveTimeout, setAutoSaveTimeout] = useState<NodeJS.Timeout | null>(null)
+  const [savingCampaigns, setSavingCampaigns] = useState<Set<string>>(new Set())
 
-  const updateBusinessName = (businessId: string, name: string) => {
-    setBusinesses((prev) =>
-      prev.map((business) =>
-        business.id === businessId ? { ...business, name } : business
-      )
+  // Fetch businesses, campaigns, and KPIs on mount
+  useEffect(() => {
+    if (user) {
+      fetchBusinesses()
+      fetchKPIs()
+    }
+  }, [user])
+
+  const fetchBusinesses = async () => {
+    try {
+      setLoading(true)
+      const response = await fetch('/api/business')
+      const data = await response.json()
+
+      if (data.success && data.businesses) {
+        // Organize businesses by type and format campaign data
+        const formatCampaigns = (campaigns: any[]): EditableCampaign[] => {
+          return campaigns.map(campaign => ({
+            id: campaign.id,
+            business_id: campaign.business_id,
+            user_id: campaign.user_id,
+            ghl_campaign_id: campaign.ghl_campaign_id,
+            name: campaign.name,
+            status: campaign.status,
+            platform: campaign.platform,
+            budget: campaign.budget ? campaign.budget.toString() : '0',
+            spent: campaign.spent ? campaign.spent.toString() : '0',
+            currency: campaign.currency,
+            impressions: campaign.impressions,
+            clicks: campaign.clicks,
+            conversions: campaign.conversions,
+            ctr: campaign.ctr,
+            cpc: campaign.cpc,
+            cpa: campaign.cpa,
+            roas: campaign.roas ? `${Number(campaign.roas).toFixed(1)}x` : '0x',
+            start_date: campaign.start_date,
+            end_date: campaign.end_date,
+            target_audience: campaign.target_audience,
+            notes: campaign.notes,
+            created_at: campaign.created_at,
+            updated_at: campaign.updated_at,
+            isEditing: false
+          }))
+        }
+
+        const church = data.businesses.find((b: any) => b.type === 'church')
+        const realEstate = data.businesses.find((b: any) => b.type === 'real_estate')
+        const marketing = data.businesses.find((b: any) => b.type === 'marketing')
+
+        setChurchBusiness(church ? {
+          id: church.id,
+          user_id: church.user_id,
+          name: church.name,
+          description: church.description,
+          type: church.type,
+          campaigns: formatCampaigns(church.campaigns || []),
+          created_at: church.created_at,
+          updated_at: church.updated_at
+        } : null)
+
+        setRealEstateBusiness(realEstate ? {
+          id: realEstate.id,
+          user_id: realEstate.user_id,
+          name: realEstate.name,
+          description: realEstate.description,
+          type: realEstate.type,
+          campaigns: formatCampaigns(realEstate.campaigns || []),
+          created_at: realEstate.created_at,
+          updated_at: realEstate.updated_at
+        } : null)
+
+        setMarketingBusiness(marketing ? {
+          id: marketing.id,
+          user_id: marketing.user_id,
+          name: marketing.name,
+          description: marketing.description,
+          type: marketing.type,
+          campaigns: formatCampaigns(marketing.campaigns || []),
+          created_at: marketing.created_at,
+          updated_at: marketing.updated_at
+        } : null)
+      }
+    } catch (error) {
+      console.error('Failed to fetch businesses:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchKPIs = async () => {
+    try {
+      console.log('📊 Fetching KPIs...')
+      const response = await fetch('/api/business/kpis')
+      const data = await response.json()
+      console.log('📈 KPIs response:', data)
+
+      if (data.success) {
+        setKpis(data.kpis)
+        console.log('✅ KPIs loaded:', data.kpis)
+      } else {
+        console.error('❌ KPIs API error:', data.error)
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch KPIs:', error)
+    }
+  }
+
+  const syncGHLCampaigns = async () => {
+    try {
+      setSyncLoading(true)
+      const response = await fetch('/api/business/sync-ghl', {
+        method: 'POST'
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        alert(`✅ Synced ${data.totalSynced} campaigns from GoHighLevel!`)
+        fetchBusinesses() // Refresh campaign data
+        fetchKPIs() // Refresh KPI data
+      } else {
+        alert(`❌ Sync failed: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('Sync failed:', error)
+      alert('❌ Failed to sync GHL campaigns')
+    } finally {
+      setSyncLoading(false)
+    }
+  }
+
+  // CRUD Functions for inline editing
+  const startEditingCampaign = (businessId: string, campaignId: string) => {
+    const updateBusiness = (business: EditableBusiness | null) => {
+      if (!business) return business
+      return {
+        ...business,
+        campaigns: business.campaigns.map(campaign =>
+          campaign.id === campaignId
+            ? {
+                ...campaign,
+                isEditing: true,
+                originalData: { ...campaign } as EditableCampaign
+              }
+            : campaign
+        )
+      }
+    }
+
+    setChurchBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setRealEstateBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setMarketingBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+  }
+
+  const cancelEditingCampaign = (businessId: string, campaignId: string) => {
+    const updateBusiness = (business: EditableBusiness | null) => {
+      if (!business) return business
+      return {
+        ...business,
+        campaigns: business.campaigns.map(campaign =>
+          campaign.id === campaignId && campaign.originalData
+            ? {
+                ...(campaign.originalData as EditableCampaign),
+                isEditing: false,
+                originalData: undefined
+              }
+            : campaign
+        )
+      }
+    }
+
+    setChurchBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setRealEstateBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setMarketingBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setHasUnsavedChanges(false)
+  }
+
+  const updateCampaignField = (businessId: string, campaignId: string, field: keyof EditableCampaign, value: any) => {
+    // Convert numeric values to strings for Campaign interface compatibility
+    let processedValue = value
+    if (['budget', 'spent'].includes(field) && typeof value === 'number') {
+      processedValue = value.toString()
+    }
+
+    const updateBusiness = (business: EditableBusiness | null) => {
+      if (!business) return business
+      return {
+        ...business,
+        campaigns: business.campaigns.map(campaign =>
+          campaign.id === campaignId
+            ? { ...campaign, [field]: processedValue }
+            : campaign
+        )
+      }
+    }
+
+    setChurchBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setRealEstateBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setMarketingBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+
+    // Auto-save for existing campaigns (not temp ones)
+    if (!campaignId.startsWith('temp-')) {
+      autoSaveCampaign(businessId, campaignId)
+    } else {
+      setHasUnsavedChanges(true)
+    }
+  }
+
+  const saveCampaignChanges = async (businessId: string, campaignId: string) => {
+    const business = churchBusiness?.id === businessId ? churchBusiness :
+                     realEstateBusiness?.id === businessId ? realEstateBusiness :
+                     marketingBusiness
+
+    if (!business) return
+
+    const campaign = business.campaigns.find(c => c.id === campaignId)
+    if (!campaign) return
+
+    try {
+      const response = await fetch(`/api/business/${businessId}/campaigns/${campaignId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: campaign.name,
+          status: campaign.status,
+          budget: campaign.budget,
+          spent: campaign.spent,
+          impressions: campaign.impressions,
+          clicks: campaign.clicks,
+          conversions: campaign.conversions,
+          notes: campaign.notes
+        })
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        // Mark as no longer editing
+        const updateBusiness = (business: EditableBusiness) => ({
+          ...business,
+          campaigns: business.campaigns.map(campaign =>
+            campaign.id === campaignId
+              ? { ...campaign, isEditing: false, originalData: undefined }
+              : campaign
+          )
+        })
+
+        if (churchBusiness?.id === businessId) setChurchBusiness(updateBusiness(churchBusiness))
+        if (realEstateBusiness?.id === businessId) setRealEstateBusiness(updateBusiness(realEstateBusiness))
+        if (marketingBusiness?.id === businessId) setMarketingBusiness(updateBusiness(marketingBusiness))
+
+        setHasUnsavedChanges(false)
+        fetchKPIs() // Refresh KPIs after changes
+        setSavingCampaigns(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(campaignId)
+          return newSet
+        })
+      } else {
+        alert(`❌ Failed to save campaign: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('Failed to save campaign:', error)
+      alert('❌ Failed to save campaign')
+    }
+  }
+
+  const addNewCampaign = (businessId: string) => {
+    const newCampaign: EditableCampaign = {
+      id: `temp-${Date.now()}`,
+      name: 'New Campaign',
+      status: 'draft',
+      budget: '0',
+      spent: '0',
+      impressions: '0',
+      clicks: '0',
+      conversions: '0',
+      roas: '0x',
+      business_id: businessId,
+      user_id: user?.id || '',
+      platform: 'manual',
+      currency: 'USD',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      isEditing: true
+    }
+
+    const updateBusiness = (business: EditableBusiness | null) => {
+      if (!business) return business
+      return {
+        ...business,
+        campaigns: [...business.campaigns, newCampaign]
+      }
+    }
+
+    setChurchBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setRealEstateBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setMarketingBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+    setHasUnsavedChanges(true)
+  }
+
+  const saveNewCampaign = async (businessId: string, tempId: string) => {
+    console.log('💾 Saving new campaign:', { businessId, tempId })
+
+    const business = churchBusiness?.id === businessId ? churchBusiness :
+                     realEstateBusiness?.id === businessId ? realEstateBusiness :
+                     marketingBusiness
+
+    console.log('🏢 Business found:', business?.name)
+
+    if (!business) {
+      console.error('❌ No business found for ID:', businessId)
+      return
+    }
+
+    const campaign = business.campaigns.find(c => c.id === tempId)
+    console.log('📊 Campaign to save:', campaign)
+
+    if (!campaign) {
+      console.error('❌ No campaign found with temp ID:', tempId)
+      return
+    }
+
+    try {
+      console.log('🚀 Making API call to create campaign...')
+      const response = await fetch(`/api/business/${businessId}/campaigns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: campaign.name,
+          status: campaign.status,
+          platform: campaign.platform,
+          budget: campaign.budget,
+          spent: campaign.spent,
+          impressions: campaign.impressions,
+          clicks: campaign.clicks,
+          conversions: campaign.conversions,
+          notes: campaign.notes
+        })
+      })
+
+      console.log('📡 API response status:', response.status)
+      const data = await response.json()
+      console.log('📡 API response data:', data)
+
+      if (data.success) {
+        console.log('✅ Campaign created successfully!')
+        fetchBusinesses() // Refresh to get the real ID
+        setHasUnsavedChanges(false)
+      } else {
+        console.error('❌ API returned error:', data.error)
+        alert(`❌ Failed to create campaign: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('❌ Network error creating campaign:', error)
+      alert('❌ Failed to create campaign')
+    }
+  }
+
+  const deleteCampaignRow = (businessId: string, campaignId: string) => {
+    if (campaignId.startsWith('temp-')) {
+      // Just remove from local state for unsaved campaigns
+      const updateBusiness = (business: EditableBusiness | null) => {
+        if (!business) return business
+        return {
+          ...business,
+          campaigns: business.campaigns.filter(c => c.id !== campaignId)
+        }
+      }
+
+      setChurchBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+      setRealEstateBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+      setMarketingBusiness(prev => prev?.id === businessId ? updateBusiness(prev) : prev)
+      setHasUnsavedChanges(false)
+    } else {
+      // Delete existing campaign
+      const business = churchBusiness?.id === businessId ? churchBusiness :
+                       realEstateBusiness?.id === businessId ? realEstateBusiness :
+                       marketingBusiness
+      const campaign = business?.campaigns.find(c => c.id === campaignId)
+      if (campaign) {
+        if (confirm(`Delete campaign "${campaign.name}"? This action cannot be undone.`)) {
+          deleteCampaign(businessId, campaignId, campaign.name)
+        }
+      }
+    }
+  }
+
+  const deleteCampaign = async (businessId: string, campaignId: string, campaignName: string) => {
+    try {
+      const response = await fetch(`/api/business/${businessId}/campaigns/${campaignId}`, {
+        method: 'DELETE'
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        fetchBusinesses()
+        fetchKPIs()
+        setHasUnsavedChanges(false)
+      } else {
+        alert(`❌ Failed to delete campaign: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('Failed to delete campaign:', error)
+      alert('❌ Failed to delete campaign')
+    }
+  }
+
+  // Auto-save functionality with debouncing
+  const autoSaveCampaign = (businessId: string, campaignId: string) => {
+    // Clear existing timeout
+    if (autoSaveTimeout) {
+      clearTimeout(autoSaveTimeout)
+    }
+
+    // Set new timeout for auto-save (2 seconds delay)
+    const timeout = setTimeout(async () => {
+      setSavingCampaigns(prev => new Set(prev).add(campaignId))
+      await saveCampaignChanges(businessId, campaignId)
+      setSavingCampaigns(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(campaignId)
+        return newSet
+      })
+    }, 2000)
+
+    setAutoSaveTimeout(timeout)
+    setHasUnsavedChanges(true)
+  }
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeout) {
+        clearTimeout(autoSaveTimeout)
+      }
+    }
+  }, [autoSaveTimeout])
+
+  if (loading) {
+    return (
+      <div className="p-8 space-y-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p>Loading your business data...</p>
+          </div>
+        </div>
+      </div>
     )
   }
 
-  const updateCampaign = (
-    businessId: string,
-    campaignId: string,
-    field: keyof Campaign,
-    value: string
-  ) => {
-    setBusinesses((prev) =>
-      prev.map((business) =>
-        business.id === businessId
-          ? {
-              ...business,
-              campaigns: business.campaigns.map((campaign) =>
-                campaign.id === campaignId ? { ...campaign, [field]: value } : campaign
-              ),
-            }
-          : business
-      )
-    )
-  }
-
-  const addCampaign = (businessId: string) => {
-    setBusinesses((prev) =>
-      prev.map((business) =>
-        business.id === businessId
-          ? {
-              ...business,
-              campaigns: [
-                ...business.campaigns,
-                {
-                  id: `${businessId}-${Date.now()}`,
-                  name: "New Campaign",
-                  status: "Draft",
-                  budget: "$0",
-                  spent: "$0",
-                  impressions: "0",
-                  clicks: "0",
-                  conversions: "0",
-                  roas: "0x",
-                },
-              ],
-            }
-          : business
-      )
-    )
-  }
-
-  const deleteCampaign = (businessId: string, campaignId: string) => {
-    setBusinesses((prev) =>
-      prev.map((business) =>
-        business.id === businessId
-          ? {
-              ...business,
-              campaigns: business.campaigns.filter((c) => c.id !== campaignId),
-            }
-          : business
-      )
-    )
-  }
   return (
     <div className="p-8 space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Business Hub</h1>
-        <p className="text-muted-foreground">
-          Overview of your business metrics and KPIs
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Business Hub</h1>
+          <p className="text-muted-foreground">
+            Overview of your business metrics and KPIs
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" disabled>
+            <TrendingUp className="mr-2 h-4 w-4" />
+            Coming Soon
+          </Button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -194,56 +549,56 @@ export default function BusinessPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Revenue
+              Campaign Revenue
             </CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$45,231</div>
+            <div className="text-2xl font-bold">{kpis?.revenue?.formatted || '$0'}</div>
             <p className="text-xs text-muted-foreground">
-              +20.1% from last month
+              Revenue from conversions
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Customers
+              Audience Reach
             </CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2,350</div>
+            <div className="text-2xl font-bold">{kpis?.customers?.formatted || '0'}</div>
             <p className="text-xs text-muted-foreground">
-              +180 from last month
+              Total campaign impressions
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Growth
+              Cost Per Conversion
             </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">+12.5%</div>
+            <div className="text-2xl font-bold">{kpis?.growth?.formatted || '$0'}</div>
             <p className="text-xs text-muted-foreground">
-              +2.4% from last month
+              Average cost to get one conversion
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Goals
+              Performance Goals
             </CardTitle>
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">8/10</div>
+            <div className="text-2xl font-bold">{kpis?.goals?.completed || 0}/{kpis?.goals?.total || 4}</div>
             <p className="text-xs text-muted-foreground">
-              80% completion rate
+              Key metrics achieved
             </p>
           </CardContent>
         </Card>
@@ -253,8 +608,8 @@ export default function BusinessPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Revenue Trend</CardTitle>
-            <CardDescription>Last 6 months</CardDescription>
+            <CardTitle>Campaign Performance</CardTitle>
+            <CardDescription>Revenue vs spend analysis</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[200px] flex items-center justify-center text-muted-foreground">
@@ -264,8 +619,8 @@ export default function BusinessPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Customer Growth</CardTitle>
-            <CardDescription>Last 6 months</CardDescription>
+            <CardTitle>Campaign Analytics</CardTitle>
+            <CardDescription>Conversion and engagement metrics</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[200px] flex items-center justify-center text-muted-foreground">
@@ -275,151 +630,701 @@ export default function BusinessPage() {
         </Card>
       </div>
 
-      {/* Campaigns Tracking Section */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Megaphone className="h-6 w-6" />
-              Campaigns Tracking
-            </h2>
-            <p className="text-muted-foreground">
-              Track and manage your marketing campaigns across all businesses
-            </p>
-          </div>
+      {/* Campaign Management Section */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Campaign Management</h2>
+          <p className="text-muted-foreground">
+            Track and manage your marketing campaigns across all businesses
+            {hasUnsavedChanges && (
+              <span className="ml-2 text-amber-600 font-medium flex items-center gap-1">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Auto-saving...
+              </span>
+            )}
+          </p>
         </div>
+        {hasUnsavedChanges && (
+          <Button variant="outline" size="sm">
+            <Save className="mr-2 h-4 w-4" />
+            Save All Changes
+          </Button>
+        )}
+      </div>
 
-        {businesses.map((business) => (
-          <Card key={business.id}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <Input
-                    value={business.name}
-                    onChange={(e) => updateBusinessName(business.id, e.target.value)}
-                    className="text-xl font-semibold border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0 mb-1"
-                    placeholder="Business Name"
-                  />
-                  <CardDescription>
-                    {business.campaigns.length} active campaign{business.campaigns.length !== 1 ? "s" : ""}
-                  </CardDescription>
-                </div>
-                <Button onClick={() => addCampaign(business.id)} size="sm">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Campaign
-                </Button>
+      {/* Church Track Table */}
+      {churchBusiness && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="h-5 w-5" />
+                  {churchBusiness.name}
+                </CardTitle>
+                <CardDescription>
+                  {churchBusiness.campaigns.length} campaigns • Campaign performance and metrics
+                </CardDescription>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[200px]">Campaign Name</TableHead>
-                      <TableHead className="w-[120px]">Status</TableHead>
-                      <TableHead className="w-[120px]">Budget</TableHead>
-                      <TableHead className="w-[120px]">Spent</TableHead>
-                      <TableHead className="w-[120px]">Impressions</TableHead>
-                      <TableHead className="w-[120px]">Clicks</TableHead>
-                      <TableHead className="w-[120px]">Conversions</TableHead>
-                      <TableHead className="w-[120px]">ROAS</TableHead>
-                      <TableHead className="w-[80px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {business.campaigns.map((campaign) => (
-                      <TableRow key={campaign.id}>
-                        <TableCell>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => addNewCampaign(churchBusiness.id)}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Campaign
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[200px]">Campaign Name</TableHead>
+                    <TableHead className="w-[100px]">Platform</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[100px]">Budget</TableHead>
+                    <TableHead className="w-[100px]">Spent</TableHead>
+                    <TableHead className="w-[100px]">Impressions</TableHead>
+                    <TableHead className="w-[100px]">Clicks</TableHead>
+                    <TableHead className="w-[100px]">Conversions</TableHead>
+                    <TableHead className="w-[100px]">ROAS</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {churchBusiness.campaigns.map((campaign) => (
+                    <TableRow key={campaign.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
                           <Input
                             value={campaign.name}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "name", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto font-medium bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
+                            onChange={(e) => updateCampaignField(churchBusiness.id, campaign.id, 'name', e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && campaign.isEditing) {
+                                saveCampaignChanges(churchBusiness.id, campaign.id)
+                              } else if (e.key === 'Escape') {
+                                cancelEditingCampaign(churchBusiness.id, campaign.id)
+                              }
+                            }}
+                            className={`border-0 p-0 h-auto font-medium bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0 ${
+                              campaign.isEditing ? 'ring-1 ring-blue-500' : ''
+                            }`}
+                            placeholder="Campaign name"
                           />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.status}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "status", e.target.value)
+                          {savingCampaigns.has(campaign.id) && (
+                            <RefreshCw className="h-3 w-3 animate-spin text-blue-500" />
+                          )}
+                        </div>
+                        {campaign.ghl_campaign_id && (
+                          <div className="text-xs text-muted-foreground mt-1">(GHL Synced)</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={campaign.platform}
+                          onValueChange={(value) => updateCampaignField(churchBusiness.id, campaign.id, 'platform', value)}
+                        >
+                          <SelectTrigger className="w-24 h-8 border-0 bg-transparent focus:ring-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ghl">GHL</SelectItem>
+                            <SelectItem value="facebook">Facebook</SelectItem>
+                            <SelectItem value="google">Google</SelectItem>
+                            <SelectItem value="linkedin">LinkedIn</SelectItem>
+                            <SelectItem value="manual">Manual</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={campaign.status}
+                          onValueChange={(value) => updateCampaignField(churchBusiness.id, campaign.id, 'status', value)}
+                        >
+                          <SelectTrigger className={`w-24 h-8 border-0 bg-transparent focus:ring-1 ${
+                            campaign.status === 'active' ? 'text-green-700' :
+                            campaign.status === 'paused' ? 'text-yellow-700' :
+                            campaign.status === 'completed' ? 'text-blue-700' : 'text-gray-700'
+                          }`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="draft">Draft</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="paused">Paused</SelectItem>
+                            <SelectItem value="completed">Completed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.budget || ''}
+                          onChange={(e) => updateCampaignField(churchBusiness.id, campaign.id, 'budget', parseFloat(e.target.value) || 0)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && campaign.isEditing) {
+                              saveCampaignChanges(churchBusiness.id, campaign.id)
+                            } else if (e.key === 'Escape') {
+                              cancelEditingCampaign(churchBusiness.id, campaign.id)
                             }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.budget}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "budget", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.spent}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "spent", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.impressions}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "impressions", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.clicks}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "clicks", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.conversions}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "conversions", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={campaign.roas}
-                            onChange={(e) =>
-                              updateCampaign(business.id, campaign.id, "roas", e.target.value)
-                            }
-                            className="border-0 p-0 h-auto bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => deleteCampaign(business.id, campaign.id)}
-                            className="h-8 w-8"
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          }}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                          step="0.01"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.spent || ''}
+                          onChange={(e) => updateCampaignField(churchBusiness.id, campaign.id, 'spent', parseFloat(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                          step="0.01"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.impressions}
+                          onChange={(e) => updateCampaignField(churchBusiness.id, campaign.id, 'impressions', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.clicks}
+                          onChange={(e) => updateCampaignField(churchBusiness.id, campaign.id, 'clicks', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.conversions}
+                          onChange={(e) => updateCampaignField(churchBusiness.id, campaign.id, 'conversions', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {campaign.roas ? `${campaign.roas}x` : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {campaign.id.startsWith('temp-') ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => saveNewCampaign(churchBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Save className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteCampaignRow(churchBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <X className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            </>
+                          ) : campaign.isEditing ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => saveCampaignChanges(churchBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Save className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => cancelEditingCampaign(churchBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <X className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => startEditingCampaign(churchBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteCampaignRow(churchBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-600" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Real Estate Table */}
+      {realEstateBusiness && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="h-5 w-5" />
+                  {realEstateBusiness.name}
+                </CardTitle>
+                <CardDescription>
+                  {realEstateBusiness.campaigns.length} campaigns • Campaign performance and metrics
+                </CardDescription>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => addNewCampaign(realEstateBusiness.id)}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Campaign
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[200px]">Campaign Name</TableHead>
+                    <TableHead className="w-[100px]">Platform</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[100px]">Budget</TableHead>
+                    <TableHead className="w-[100px]">Spent</TableHead>
+                    <TableHead className="w-[100px]">Impressions</TableHead>
+                    <TableHead className="w-[100px]">Clicks</TableHead>
+                    <TableHead className="w-[100px]">Conversions</TableHead>
+                    <TableHead className="w-[100px]">ROAS</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {realEstateBusiness.campaigns.map((campaign) => (
+                    <TableRow key={campaign.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={campaign.name}
+                            onChange={(e) => updateCampaignField(realEstateBusiness.id, campaign.id, 'name', e.target.value)}
+                            className={`border-0 p-0 h-auto font-medium bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0 ${
+                              campaign.isEditing ? 'ring-1 ring-blue-500' : ''
+                            }`}
+                            placeholder="Campaign name"
+                          />
+                          {savingCampaigns.has(campaign.id) && (
+                            <RefreshCw className="h-3 w-3 animate-spin text-blue-500" />
+                          )}
+                        </div>
+                        {campaign.ghl_campaign_id && (
+                          <div className="text-xs text-muted-foreground mt-1">(GHL Synced)</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={campaign.platform}
+                          onValueChange={(value) => updateCampaignField(realEstateBusiness.id, campaign.id, 'platform', value)}
+                        >
+                          <SelectTrigger className="w-24 h-8 border-0 bg-transparent focus:ring-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ghl">GHL</SelectItem>
+                            <SelectItem value="facebook">Facebook</SelectItem>
+                            <SelectItem value="google">Google</SelectItem>
+                            <SelectItem value="linkedin">LinkedIn</SelectItem>
+                            <SelectItem value="manual">Manual</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={campaign.status}
+                          onValueChange={(value) => updateCampaignField(realEstateBusiness.id, campaign.id, 'status', value)}
+                        >
+                          <SelectTrigger className={`w-24 h-8 border-0 bg-transparent focus:ring-1 ${
+                            campaign.status === 'active' ? 'text-green-700' :
+                            campaign.status === 'paused' ? 'text-yellow-700' :
+                            campaign.status === 'completed' ? 'text-blue-700' : 'text-gray-700'
+                          }`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="draft">Draft</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="paused">Paused</SelectItem>
+                            <SelectItem value="completed">Completed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.budget || ''}
+                          onChange={(e) => updateCampaignField(realEstateBusiness.id, campaign.id, 'budget', parseFloat(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                          step="0.01"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.spent || ''}
+                          onChange={(e) => updateCampaignField(realEstateBusiness.id, campaign.id, 'spent', parseFloat(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                          step="0.01"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.impressions}
+                          onChange={(e) => updateCampaignField(realEstateBusiness.id, campaign.id, 'impressions', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.clicks}
+                          onChange={(e) => updateCampaignField(realEstateBusiness.id, campaign.id, 'clicks', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.conversions}
+                          onChange={(e) => updateCampaignField(realEstateBusiness.id, campaign.id, 'conversions', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {campaign.roas ? `${campaign.roas}x` : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {campaign.id.startsWith('temp-') ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => saveNewCampaign(realEstateBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Save className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteCampaignRow(realEstateBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <X className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            </>
+                          ) : campaign.isEditing ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => saveCampaignChanges(realEstateBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Save className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => cancelEditingCampaign(realEstateBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <X className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => startEditingCampaign(realEstateBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteCampaignRow(realEstateBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-600" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Marketing Agency Table */}
+      {marketingBusiness && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="h-5 w-5" />
+                  {marketingBusiness.name}
+                </CardTitle>
+                <CardDescription>
+                  {marketingBusiness.campaigns.length} campaigns • Campaign performance and metrics
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => addNewCampaign(marketingBusiness.id)}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Campaign
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[200px]">Campaign Name</TableHead>
+                    <TableHead className="w-[100px]">Platform</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[100px]">Budget</TableHead>
+                    <TableHead className="w-[100px]">Spent</TableHead>
+                    <TableHead className="w-[100px]">Impressions</TableHead>
+                    <TableHead className="w-[100px]">Clicks</TableHead>
+                    <TableHead className="w-[100px]">Conversions</TableHead>
+                    <TableHead className="w-[100px]">ROAS</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {marketingBusiness.campaigns.map((campaign) => (
+                    <TableRow key={campaign.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={campaign.name}
+                            onChange={(e) => updateCampaignField(marketingBusiness.id, campaign.id, 'name', e.target.value)}
+                            className={`border-0 p-0 h-auto font-medium bg-transparent focus-visible:ring-1 focus-visible:ring-offset-0 ${
+                              campaign.isEditing ? 'ring-1 ring-blue-500' : ''
+                            }`}
+                            placeholder="Campaign name"
+                          />
+                          {savingCampaigns.has(campaign.id) && (
+                            <RefreshCw className="h-3 w-3 animate-spin text-blue-500" />
+                          )}
+                        </div>
+                        {campaign.ghl_campaign_id && (
+                          <div className="text-xs text-muted-foreground mt-1">(GHL Synced)</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={campaign.platform}
+                          onValueChange={(value) => updateCampaignField(marketingBusiness.id, campaign.id, 'platform', value)}
+                        >
+                          <SelectTrigger className="w-24 h-8 border-0 bg-transparent focus:ring-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ghl">GHL</SelectItem>
+                            <SelectItem value="facebook">Facebook</SelectItem>
+                            <SelectItem value="google">Google</SelectItem>
+                            <SelectItem value="linkedin">LinkedIn</SelectItem>
+                            <SelectItem value="manual">Manual</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={campaign.status}
+                          onValueChange={(value) => updateCampaignField(marketingBusiness.id, campaign.id, 'status', value)}
+                        >
+                          <SelectTrigger className={`w-24 h-8 border-0 bg-transparent focus:ring-1 ${
+                            campaign.status === 'active' ? 'text-green-700' :
+                            campaign.status === 'paused' ? 'text-yellow-700' :
+                            campaign.status === 'completed' ? 'text-blue-700' : 'text-gray-700'
+                          }`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="draft">Draft</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="paused">Paused</SelectItem>
+                            <SelectItem value="completed">Completed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.budget || ''}
+                          onChange={(e) => updateCampaignField(marketingBusiness.id, campaign.id, 'budget', parseFloat(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                          step="0.01"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.spent || ''}
+                          onChange={(e) => updateCampaignField(marketingBusiness.id, campaign.id, 'spent', parseFloat(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                          step="0.01"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.impressions}
+                          onChange={(e) => updateCampaignField(marketingBusiness.id, campaign.id, 'impressions', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.clicks}
+                          onChange={(e) => updateCampaignField(marketingBusiness.id, campaign.id, 'clicks', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={campaign.conversions}
+                          onChange={(e) => updateCampaignField(marketingBusiness.id, campaign.id, 'conversions', parseInt(e.target.value) || 0)}
+                          className="w-20 h-8 border-0 bg-transparent focus:ring-1 text-right"
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {campaign.roas ? `${campaign.roas}x` : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {campaign.id.startsWith('temp-') ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => saveNewCampaign(marketingBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Save className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteCampaignRow(marketingBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <X className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            </>
+                          ) : campaign.isEditing ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => saveCampaignChanges(marketingBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Save className="h-4 w-4 text-green-600" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => cancelEditingCampaign(marketingBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <X className="h-4 w-4 text-gray-600" />
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => startEditingCampaign(marketingBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteCampaignRow(marketingBusiness.id, campaign.id)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-600" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

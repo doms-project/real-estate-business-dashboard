@@ -62,6 +62,20 @@ Click **"Add Another"** for each variable below:
 
 ---
 
+#### Variable 6: IPinfo API Token (for Analytics Geolocation)
+- **Key**: `IPINFO_API_TOKEN`
+- **Value**: Your IPinfo API token from [ipinfo.io](https://ipinfo.io/)
+- **Environments**: ✅ Production, ✅ Preview, ✅ Development
+
+**How to get it:**
+1. Go to [ipinfo.io](https://ipinfo.io/)
+2. Sign up for a free account
+3. Go to your account dashboard
+4. Copy your API token
+5. Add it here for visitor geolocation in analytics
+
+---
+
 ### Step 3: Verify All Variables Are Added
 
 You should see all 5 variables listed:

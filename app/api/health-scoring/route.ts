@@ -307,7 +307,7 @@ async function fetchLocationMetrics(locationId: string): Promise<Record<string, 
       .from('ghl_location_metrics')
       .select('*')
       .eq('location_id', locationId)
-      .order('last_updated', { ascending: false })
+      .order('updated_at', { ascending: false })
       .limit(1)
       .single()
 
@@ -373,7 +373,7 @@ async function fetchLocationMetrics(locationId: string): Promise<Record<string, 
 
       // Additional metrics for health scoring
       total_conversations: locationMetrics.conversations_count || 0,
-      last_updated: locationMetrics.last_updated,
+      updated_at: locationMetrics.updated_at,
       health_score: locationMetrics.health_score || 60,
       data_age_hours: locationMetrics.data_age_hours || 0
     }

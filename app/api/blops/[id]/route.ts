@@ -37,6 +37,7 @@ export async function PUT(
         y: body.y,
         shape: body.shape,
         color: body.color,
+        title: body.title,
         content: body.content,
         type: body.type,
         tags: body.tags,
@@ -115,13 +116,27 @@ export async function DELETE(
       )
     }
 
-    // Delete the blop
-    const { error } = await supabaseAdmin
+    // If blop was found, use workspace_id for deletion
+    // If blop was not found (PGRST116), it might have been deleted already
+    if (fetchError?.code === 'PGRST116') {
+      console.log('Blop not found, may have been deleted already')
+      return NextResponse.json({ success: true, message: 'Blop not found, possibly already deleted' })
+    }
+
+    // Delete the blop - use workspace_id if available, otherwise try without it
+    let deleteQuery = supabaseAdmin
       .from('blops')
       .delete()
       .eq('id', blopId)
       .eq('user_id', userId)
 
+    if (blopData?.workspace_id) {
+      deleteQuery = deleteQuery.eq('workspace_id', blopData.workspace_id)
+    }
+
+    const { error } = await deleteQuery
+
+    console.log('Delete operation result:', error)
     if (error) {
       console.error('Error deleting blop:', error)
       return NextResponse.json(

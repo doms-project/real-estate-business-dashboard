@@ -29,6 +29,7 @@ interface GHLLocation {
 
 function LocationCard({ location, metrics, router }: { location: GHLLocation, metrics: { contacts: number, opportunities: number, conversations: number, healthScore?: number }, router: any }) {
   const { contacts, opportunities, conversations, healthScore: apiHealthScore } = metrics
+  const [isNavigating, setIsNavigating] = useState(false)
 
   // Check if data has been loaded for this location
   // -1 values indicate data not loaded yet, 0 values indicate loaded but zero activity
@@ -103,14 +104,19 @@ function LocationCard({ location, metrics, router }: { location: GHLLocation, me
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
+            onClick={async () => {
+              setIsNavigating(true)
               console.log('🔗 Navigating to location:', location.id, 'Name:', location.name)
               router.push(`/agency/gohighlevel-clients/${location.id}`)
             }}
             className="flex-1"
-            disabled={isLoading}
+            disabled={isLoading || isNavigating}
           >
-            <Eye className="mr-2 h-4 w-4" />
+            {isNavigating ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Eye className="mr-2 h-4 w-4" />
+            )}
             View Dashboard
           </Button>
         </div>
@@ -135,6 +141,8 @@ export default function GHLClientsPage() {
     maxAttempts: 3
   })
 
+  const [apiProgress, setApiProgress] = useState({ completed: 0, total: 0, currentEndpoint: '' })
+
   // Retry counter for stuck loading states
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 3;
@@ -152,6 +160,7 @@ export default function GHLClientsPage() {
     setLocationsData(null);
     setLocationsLoading(true);
     setRetryCount(prev => prev + 1);
+    setApiProgress({ completed: 0, total: 0, currentEndpoint: '' });
 
     // Reset progress
     setLoadingProgress({
@@ -185,6 +194,7 @@ export default function GHLClientsPage() {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         setLocationsLoading(true)
+        setApiProgress({ completed: 1, total: 4, currentEndpoint: 'connecting to GHL' })
         setLoadingProgress({
           current: `Connecting to GoHighLevel... (Attempt ${attempt}/${maxRetries})`,
           completed: false,
@@ -199,6 +209,7 @@ export default function GHLClientsPage() {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
 
+        setApiProgress({ completed: 2, total: 4, currentEndpoint: 'fetching locations' })
         setLoadingProgress({
           current: `Fetching location data... (Attempt ${attempt}/${maxRetries})`,
           completed: false,
@@ -218,6 +229,7 @@ export default function GHLClientsPage() {
           throw new Error(`Server returned ${response.status}: ${response.statusText}`)
         }
 
+        setApiProgress({ completed: 3, total: 4, currentEndpoint: 'processing data' })
         setLoadingProgress({
           current: 'Processing location data...',
           completed: false,
@@ -230,6 +242,7 @@ export default function GHLClientsPage() {
         clearTimeout(timeoutId); // Safe to clear now
         console.log('📍 Dashboard - Locations response:', data)
 
+        setApiProgress({ completed: 4, total: 4, currentEndpoint: 'complete' })
         setLoadingProgress({
           current: 'Loading complete!',
           completed: true,
@@ -337,6 +350,7 @@ export default function GHLClientsPage() {
 
   // Track if we've refreshed APIs in this session
   const [hasRefreshedAPIs, setHasRefreshedAPIs] = useState(false);
+  const hasLoadedRef = useRef(false);
 
 
   // Refresh metrics from GHL API and update database
@@ -415,7 +429,7 @@ export default function GHLClientsPage() {
 
         // Use database timestamp instead of current time
         const dbTimestamps = Object.values(metricsMap).map((metric: any) =>
-          metric.last_updated ? new Date(metric.last_updated).getTime() : 0
+          metric.updated_at ? new Date(metric.updated_at).getTime() : 0
         ).filter(timestamp => timestamp > 0);
 
         const mostRecentDbUpdate = dbTimestamps.length > 0 ? Math.max(...dbTimestamps) : Date.now();
@@ -503,7 +517,7 @@ export default function GHLClientsPage() {
 
           // Use database timestamp from metrics data instead of result.lastUpdated
           const dbTimestamps = result.data.map((item: any) =>
-            item.last_updated ? new Date(item.last_updated).getTime() : 0
+            item.updated_at ? new Date(item.updated_at).getTime() : 0
           ).filter((timestamp: number) => timestamp > 0);
 
           const mostRecentDbUpdate = dbTimestamps.length > 0 ? Math.max(...dbTimestamps) : Date.now();
@@ -566,13 +580,11 @@ export default function GHLClientsPage() {
 
   // Automatic smart loading on component mount
   useEffect(() => {
-    if (locations.length > 0) {
+    if (locations.length > 0 && !hasLoadedRef.current) {
       console.log('🔄 Dashboard: Smart loading metrics (cache-first approach)...');
-      if (!isRefreshing && !hasRefreshedAPIs) {
-        setHasRefreshedAPIs(true);
-        console.log('🚀 Triggering smart data load for all locations...');
-        loadMetricsSmart();
-      }
+      hasLoadedRef.current = true;
+      console.log('🚀 Triggering smart data load for all locations...');
+      loadMetricsSmart();
     }
   }, [locations, loadMetricsSmart]);
 
@@ -778,24 +790,6 @@ export default function GHLClientsPage() {
           )}
         </div>
         <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              if (locations.length === 0 && !locationsLoading) {
-                // If no locations loaded, try loading locations first
-                fetchLocationsWithRetry()
-              } else if (locations.length > 0) {
-                // If locations are loaded, refresh the metrics
-                refreshMetricsFromAPI()
-              }
-            }}
-            variant="outline"
-            size="sm"
-            className="mr-2"
-            disabled={locationsLoading}
-          >
-            {locationsLoading ? 'Loading...' :
-             locations.length === 0 ? 'Load Locations' : 'Load Data'}
-          </Button>
           {(locationsLoading || loadingProgress.error) && retryCount < maxRetries && (
             <Button
               onClick={forceRetry}
@@ -847,7 +841,27 @@ export default function GHLClientsPage() {
                 </span>
               </div>
 
-              {!loadingProgress.error && (
+              {!loadingProgress.error && apiProgress.total > 0 && (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-blue-700">
+                      {apiProgress.completed} / {apiProgress.total} steps completed
+                    </span>
+                    <span className="text-blue-600 font-medium">
+                      {Math.round((apiProgress.completed / apiProgress.total) * 100)}%
+                    </span>
+                  </div>
+                  <Progress
+                    value={(apiProgress.completed / apiProgress.total) * 100}
+                    className="h-2"
+                  />
+                  <p className="text-xs text-blue-600">
+                    Current: {apiProgress.currentEndpoint}...
+                  </p>
+                </>
+              )}
+
+              {!loadingProgress.error && apiProgress.total === 0 && (
                 <Progress
                   value={loadingProgress.completed ? 100 : 20 + (loadingProgress.attempt * 25)}
                   className="h-2"
@@ -899,7 +913,7 @@ export default function GHLClientsPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {Object.keys(locationMetrics).length === 0 ? (
-                <div className="animate-pulse bg-gray-200 h-8 rounded w-20"></div>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
                 Object.values(locationMetrics).filter(m => (m.contacts || 0) > 0).length
               )}
@@ -917,7 +931,7 @@ export default function GHLClientsPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {Object.keys(locationMetrics).length === 0 ? (
-                <div className="animate-pulse bg-gray-200 h-8 rounded w-20"></div>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
                 totalOpportunities.toLocaleString()
               )}
@@ -935,7 +949,7 @@ export default function GHLClientsPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {Object.keys(locationMetrics).length === 0 ? (
-                <div className="animate-pulse bg-gray-200 h-8 rounded w-20"></div>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
                 Math.round(Object.values(locationMetrics).reduce((sum, m) => sum + (m.healthScore || 0), 0) / Math.max(Object.keys(locationMetrics).length, 1))
               )}
@@ -953,7 +967,7 @@ export default function GHLClientsPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {Object.keys(locationMetrics).length === 0 ? (
-                <div className="animate-pulse bg-gray-200 h-8 rounded w-20"></div>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
                 `${Math.round((totalOpportunities / Math.max(totalContacts, 1)) * 100)}%`
               )}
@@ -971,7 +985,7 @@ export default function GHLClientsPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {Object.keys(locationMetrics).length === 0 ? (
-                <div className="animate-pulse bg-gray-200 h-8 rounded w-20"></div>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
                 totalConversations.toLocaleString()
               )}
@@ -989,7 +1003,7 @@ export default function GHLClientsPage() {
           <CardContent>
             <div className="text-2xl font-bold">
               {Object.keys(locationMetrics).length === 0 ? (
-                <div className="animate-pulse bg-gray-200 h-8 rounded w-20"></div>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
                 `${Math.round((totalConversations / Math.max(totalContacts, 1)) * 100)}%`
               )}

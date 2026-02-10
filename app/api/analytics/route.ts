@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
 
       try {
         // Use IPinfo.io for geolocation (free tier: unlimited requests)
-        const geoResponse = await fetch(`https://ipinfo.io/${clientIP}/json?token=cedf5f0bc8e361`, {
+        const geoResponse = await fetch(`https://ipinfo.io/${clientIP}/json?token=${process.env.IPINFO_API_TOKEN}`, {
           headers: {
             'User-Agent': 'Real-Estate-Analytics/1.0'
           }

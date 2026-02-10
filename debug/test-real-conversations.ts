@@ -1,6 +1,6 @@
 // Test REAL conversation counts from GHL API
-import { GHLClient } from './lib/ghl-client.js';
-import { GHL_LOCATIONS } from './lib/ghl-config.js';
+import { GHLClient } from '../lib/ghl-client.js';
+import { GHL_LOCATIONS } from '../lib/ghl-config.js';
 
 const client = new GHLClient();
 

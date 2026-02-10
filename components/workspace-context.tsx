@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { useUser } from '@clerk/nextjs'
 
 interface Workspace {
@@ -30,7 +30,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaceSwitchCount, setWorkspaceSwitchCount] = useState(0)
 
   // Load workspaces and set current workspace
-  const refreshWorkspaces = async () => {
+  const refreshWorkspaces = useCallback(async () => {
     if (!user) return
 
     try {
@@ -67,7 +67,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user, setLoading, setAvailableWorkspaces, setCurrentWorkspace])
 
   // Handle workspace switching
   const handleSetCurrentWorkspace = (workspace: Workspace) => {
@@ -88,7 +88,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setAvailableWorkspaces([])
       setLoading(false)
     }
-  }, [user])
+  }, [user, refreshWorkspaces])
 
   const value: WorkspaceContextType = {
     currentWorkspace,

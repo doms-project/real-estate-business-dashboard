@@ -431,11 +431,11 @@ export default function PropertiesPage() {
   }, [calculateMonthlyCosts])
 
   // Calculate Annual Return on Investment (ROI)
-  const calculateROI = (property: Property): number => {
+  const calculateROI = useCallback((property: Property): number => {
     const annualCashflow = calculateMonthlyCashflow(property) * 12
     if (property.purchasePrice <= 0) return 0
     return (annualCashflow / property.purchasePrice) * 100
-  }
+  }, [calculateMonthlyCashflow])
 
   // Filter properties
   const filteredProperties = useMemo(() => {
@@ -1582,9 +1582,10 @@ export default function PropertiesPage() {
 
   // Cleanup auto-save timeouts on unmount
   useEffect(() => {
+    const timeouts = autoSaveTimeouts.current
     return () => {
-      autoSaveTimeouts.current.forEach(timeoutId => clearTimeout(timeoutId))
-      autoSaveTimeouts.current.clear()
+      timeouts.forEach(timeoutId => clearTimeout(timeoutId))
+      timeouts.clear()
     }
   }, [])
 

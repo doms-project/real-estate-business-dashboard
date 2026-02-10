@@ -79,7 +79,7 @@ export function MyWorkspaceRequests() {
     })
 
     return unsubscribe
-  }, [])
+  }, [refreshWorkspaces, toast])
 
   const getStatusBadge = (status: string, workspaceCreated?: boolean) => {
     switch (status) {
@@ -122,7 +122,7 @@ export function MyWorkspaceRequests() {
         {requests.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>You haven't submitted any workspace requests yet</p>
+            <p>You haven&apos;t submitted any workspace requests yet</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -152,7 +152,7 @@ export function MyWorkspaceRequests() {
                     {request.status === 'approved' && request.workspaceCreated && (
                       <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
                         <p className="text-sm text-blue-800">
-                          ✅ <span className="font-medium">Workspace Created!</span> "{request.workspace_name}" is now ready to use.
+                          ✅ <span className="font-medium">Workspace Created!</span> &quot;{request.workspace_name}&quot; is now ready to use.
                         </p>
                         <p className="text-xs text-blue-600 mt-1">
                           You can access it from your workspace list.

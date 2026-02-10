@@ -43,7 +43,7 @@ async function verifyUpsert(locationId: string, locationName: string, operation:
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     // Use the same client creation as cached API to ensure consistency
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -57,16 +57,23 @@ export async function POST() {
       }, { status: 500 })
     }
 
-    // Create fresh Supabase client (same as cached API)
+    // Create fresh Supabase client with no-cache headers (same as cached API)
     const supabase = createClient(supabaseUrl, supabaseKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
       },
+      global: {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      }
     })
 
     console.log('🔄 Starting metrics refresh from GHL API...')
     console.log('⏰ TIMESTAMP - START:', new Date().toISOString())
+    console.log('🔧 REQUEST RECEIVED - checking for force flag:', !!request.url?.includes('force=true'))
 
     // Load locations from the database (not JSON)
     console.log('📍 Loading locations from database...')
@@ -87,6 +94,7 @@ export async function POST() {
 
     console.log(`📍 Processing ${locations.length} locations from database`)
     console.log(`📍 Using ${locations.length} active locations`)
+    console.log('📍 Location details:', locations.map(loc => ({ id: loc.id, name: loc.name })))
 
     // Fetch metrics for each location in batches using the working /api/ghl/data endpoints
     console.log('⏰ TIMESTAMP - API CALLS START:', new Date().toISOString())
@@ -134,7 +142,7 @@ export async function POST() {
             opportunities_count: opportunitiesCount,
             conversations_count: conversationsCount,
             health_score: healthScore,
-            last_updated: new Date().toISOString()
+            updated_at: new Date().toISOString()
           }
 
           console.log(`✅ ${location.name}: contacts=${contactsCount}, opportunities=${opportunitiesCount}, conversations=${conversationsCount}`)
@@ -150,7 +158,7 @@ export async function POST() {
             opportunities_count: 0,
             conversations_count: 0,
             health_score: 0,
-            last_updated: new Date().toISOString()
+            updated_at: new Date().toISOString()
           }
         }
       })
@@ -165,10 +173,23 @@ export async function POST() {
     }
 
     console.log('⏰ TIMESTAMP - API CALLS END:', new Date().toISOString())
+    console.log(`📊 Collected ${allMetrics.length} metrics from GHL API`)
+    console.log('📊 Sample metrics:', allMetrics.slice(0, 3).map(m => ({
+      location_id: m.location_id,
+      location_name: m.location_name,
+      contacts: m.contacts_count,
+      opportunities: m.opportunities_count,
+      conversations: m.conversations_count
+    })))
 
     // Store all metrics in database
     console.log('⏰ TIMESTAMP - UPSERT START:', new Date().toISOString())
     console.log(`💾 Storing ${allMetrics.length} metrics in database...`)
+    console.log('🔧 SUPABASE CLIENT CHECK:', {
+      url: supabaseUrl?.substring(0, 30) + '...',
+      keyExists: !!supabaseKey,
+      client: !!supabase
+    })
 
     console.log('📊 Attempting to upsert metrics:', allMetrics.map(m => ({
       location_id: m.location_id,
@@ -201,21 +222,51 @@ export async function POST() {
 
     for (const metric of allMetrics) {
       try {
+        // First check if data actually changed
+        const { data: existingData, error: existingError } = await supabase
+          .from('ghl_location_metrics')
+          .select('contacts_count, opportunities_count, conversations_count, health_score, last_checked')
+          .eq('location_id', metric.location_id)
+          .single()
+
+        const dataChanged = !existingData ||
+          existingData.contacts_count !== metric.contacts_count ||
+          existingData.opportunities_count !== metric.opportunities_count ||
+          existingData.conversations_count !== metric.conversations_count ||
+          existingData.health_score !== metric.health_score
+
+        console.log(`🔍 ${metric.location_name}: existingData=${!!existingData}, dataChanged=${dataChanged}`)
+        if (existingData) {
+          console.log(`🔍 Existing: contacts=${existingData.contacts_count}, opportunities=${existingData.opportunities_count}, conversations=${existingData.conversations_count}, health=${existingData.health_score}`)
+          console.log(`🔍 New: contacts=${metric.contacts_count}, opportunities=${metric.opportunities_count}, conversations=${metric.conversations_count}, health=${metric.health_score}`)
+        }
+
+        // Always update last_checked (we verified the data)
+        // Also always update updated_at to ensure the record is touched
+        const updateFields: any = {
+          last_checked: new Date().toISOString(),
+          updated_at: new Date().toISOString()  // Always update to ensure record is touched
+        }
+
+        if (dataChanged) {
+          updateFields.contacts_count = metric.contacts_count
+          updateFields.opportunities_count = metric.opportunities_count
+          updateFields.conversations_count = metric.conversations_count
+          updateFields.health_score = metric.health_score
+          console.log(`📝 ${metric.location_name}: UPDATING all fields (data changed)`)
+        } else {
+          console.log(`📝 ${metric.location_name}: UPDATING timestamps only (data unchanged)`)
+        }
+
         // First try to update existing record
         const { data: updateData, error: updateError } = await supabase
           .from('ghl_location_metrics')
-          .update({
-            location_name: metric.location_name,
-            contacts_count: metric.contacts_count,
-            opportunities_count: metric.opportunities_count,
-            conversations_count: metric.conversations_count,
-            health_score: metric.health_score,
-            last_updated: metric.last_updated
-          })
+          .update(updateFields)
           .eq('location_id', metric.location_id)
           .select()
 
         if (updateError) {
+          console.error(`❌ Update failed for ${metric.location_name}:`, updateError)
           console.log(`⚠️ Update failed for ${metric.location_name}, trying insert...`)
 
           // If update failed, try to insert new record
@@ -228,7 +279,8 @@ export async function POST() {
               opportunities_count: metric.opportunities_count,
               conversations_count: metric.conversations_count,
               health_score: metric.health_score,
-              last_updated: metric.last_updated
+              updated_at: new Date().toISOString(),
+              last_checked: new Date().toISOString()
             })
             .select()
 
@@ -240,14 +292,16 @@ export async function POST() {
               console.error(`❌ Failed to insert ${metric.location_name}:`, insertError)
             }
           } else if (insertData && insertData.length > 0) {
-            console.log(`✅ Inserted ${metric.location_name}`)
+            console.log(`✅ Inserted ${metric.location_name} - returned ${insertData.length} rows`)
             // Verify the insert actually worked
             await verifyUpsert(metric.location_id, metric.location_name, 'insert')
           } else {
             console.log(`⚠️ Insert reported success but no data returned for ${metric.location_name}`)
           }
         } else if (updateData && updateData.length > 0) {
-          console.log(`✅ Updated ${metric.location_name}`)
+          console.log(`✅ Updated ${metric.location_name} - returned ${updateData.length} rows`)
+          console.log(`📅 New last_checked: ${updateData[0].last_checked}`)
+          console.log(`📅 New updated_at: ${updateData[0].updated_at}`)
           // Verify the update actually worked
           await verifyUpsert(metric.location_id, metric.location_name, 'update')
         } else {
@@ -263,6 +317,10 @@ export async function POST() {
 
     console.log('⏰ TIMESTAMP - UPSERT END:', new Date().toISOString())
     console.log('✅ Successfully refreshed and stored all metrics!')
+    console.log('📊 FINAL SUMMARY:', {
+      locationsProcessed: allMetrics.length,
+      currentTimestamp: new Date().toISOString()
+    })
 
     // Verify the data was actually stored - check total count first
     const { count: totalCount, error: countError } = await supabase
@@ -275,7 +333,7 @@ export async function POST() {
     const { data: verifyData, error: verifyError } = await supabase
       .from('ghl_location_metrics')
       .select('*')
-      .order('last_updated', { ascending: false })
+      .order('updated_at', { ascending: false })
 
     console.log('🔍 Verification - total records retrieved:', verifyData?.length || 0)
     console.log('🔍 Verification - error:', verifyError)
@@ -290,7 +348,7 @@ export async function POST() {
       contacts: choppinThrottles.contacts_count,
       opportunities: choppinThrottles.opportunities_count,
       conversations: choppinThrottles.conversations_count,
-      last_updated: choppinThrottles.last_updated
+      updated_at: choppinThrottles.updated_at
     } : 'NOT FOUND')
 
     // Check if we have the expected number of locations
@@ -327,12 +385,14 @@ export async function POST() {
     try {
       const { userId } = await auth()
       if (userId && allMetrics.length > 0) {
+        const { getOrCreateUserWorkspace } = await import('@/lib/workspace-helpers')
+        const workspace = await getOrCreateUserWorkspace(userId)
         await activityTracker.logActivity(
           userId,
           'ghl_metrics_refreshed',
           'Metrics Refreshed',
           `Refreshed latest metrics for ${allMetrics.length} locations`,
-          undefined, // No specific workspace for GHL metrics
+          workspace.id,
           { locationCount: allMetrics.length, source: 'live_api' }
         )
       }
