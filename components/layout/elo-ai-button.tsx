@@ -106,16 +106,23 @@ export function EloAiButton() {
 
   useEffect(() => {
     if (user) {
-      // Create a minimal general context
+      // Create context with available page data
       const ctx: BusinessContext = {
         userId: user.id,
         summary: {
           clients: [],
         },
+        // Include page data if available
+        locations: pageData?.totalLocations || 0,
+        totalLocations: pageData?.totalLocations || 0,
+        allLocations: pageData?.locationsData || [],
+        // Add other available page data
+        ...pageData,
       }
       setContext(ctx)
+      console.log('🤖 ELO AI Button - Created context with pageData:', !!pageData, 'totalLocations:', pageData?.totalLocations)
     }
-  }, [user])
+  }, [user, pageData])
 
   if (!context) return null
 
