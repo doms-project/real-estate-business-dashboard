@@ -6,6 +6,7 @@
 interface CacheEntry {
   response: string
   timestamp: number
+  conversationId?: string
   sqlQuery?: string
   resultCount?: number
 }

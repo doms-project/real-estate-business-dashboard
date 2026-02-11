@@ -52,8 +52,28 @@ interface SpeechRecognitionAlternative {
 }
 
 interface Message {
+  id?: string
   role: "user" | "assistant"
   content: string
+  timestamp?: Date
+  metadata?: any
+}
+
+interface ProactiveInsight {
+  id: string
+  type: 'opportunity' | 'risk' | 'trend' | 'recommendation' | 'alert'
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  title: string
+  description: string
+  recommendations: string[]
+  impactEstimate?: string
+  confidenceScore: number
+}
+
+interface ConversationContext {
+  conversationId?: string
+  proactiveInsights?: ProactiveInsight[]
+  conversationSummary?: string
 }
 
 declare global {
@@ -128,6 +148,8 @@ interface AiCoachPanelProps {
   pageData?: Record<string, any> // Specific data visible on the current page
   selectedModel?: string // Selected AI model
   onModelChange?: (model: string) => void // Callback when model changes
+  conversationId?: string // For conversation continuity
+  onConversationUpdate?: (conversationId: string) => void // Callback when conversation changes
 }
 
 const DEFAULT_QUICK_ACTIONS = [
@@ -144,7 +166,9 @@ function AiCoachPanelInternal({
   pageContext,
   pageData,
   selectedModel = "openrouter-free",
-  onModelChange
+  onModelChange,
+  conversationId: initialConversationId,
+  onConversationUpdate
 }: AiCoachPanelProps) {
   console.log('🤖 AiCoachPanel - Received pageContext:', pageContext, 'quickActions:', quickActions?.map(qa => qa.label), 'pageData keys:', pageData ? Object.keys(pageData) : 'none')
 
@@ -161,6 +185,9 @@ function AiCoachPanelInternal({
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [conversationId, setConversationId] = useState<string | undefined>(initialConversationId)
+  const [proactiveInsights, setProactiveInsights] = useState<ProactiveInsight[]>([])
+  const [conversationSummary, setConversationSummary] = useState<string>('')
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -364,6 +391,22 @@ function AiCoachPanelInternal({
 
         setIsLoading(false)
 
+        // Update conversation state
+        if (data.conversationId && data.conversationId !== conversationId) {
+          setConversationId(data.conversationId)
+          onConversationUpdate?.(data.conversationId)
+        }
+
+        // Update proactive insights
+        if (data.proactiveInsights) {
+          setProactiveInsights(data.proactiveInsights)
+        }
+
+        // Update conversation summary
+        if (data.conversationSummary) {
+          setConversationSummary(data.conversationSummary)
+        }
+
         // Log database info to console for debugging
         if (data.dataInfo) {
           console.log("Database Query Info:", {
@@ -455,6 +498,60 @@ function AiCoachPanelInternal({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Proactive Insights */}
+      {proactiveInsights.length > 0 && (
+        <div className="p-4 border-t bg-blue-50/30">
+          <div className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+            <Brain className="h-4 w-4" />
+            Proactive Insights
+          </div>
+          <div className="space-y-3 max-h-48 overflow-y-auto">
+            {proactiveInsights.map((insight) => (
+              <div
+                key={insight.id}
+                className={`p-3 rounded-lg border-l-4 ${
+                  insight.severity === 'critical' ? 'border-red-500 bg-red-50' :
+                  insight.severity === 'high' ? 'border-orange-500 bg-orange-50' :
+                  insight.severity === 'medium' ? 'border-yellow-500 bg-yellow-50' :
+                  'border-blue-500 bg-blue-50'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h4 className="text-sm font-medium">{insight.title}</h4>
+                  <span className={`text-xs px-2 py-1 rounded ${
+                    insight.severity === 'critical' ? 'bg-red-200 text-red-800' :
+                    insight.severity === 'high' ? 'bg-orange-200 text-orange-800' :
+                    insight.severity === 'medium' ? 'bg-yellow-200 text-yellow-800' :
+                    'bg-blue-200 text-blue-800'
+                  }`}>
+                    {insight.severity}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2">{insight.description}</p>
+                {insight.recommendations.length > 0 && (
+                  <div className="text-xs">
+                    <strong>Recommendations:</strong>
+                    <ul className="mt-1 space-y-1">
+                      {insight.recommendations.slice(0, 2).map((rec, idx) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-blue-500 mt-1">•</span>
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {insight.impactEstimate && (
+                  <div className="text-xs text-green-600 mt-2 font-medium">
+                    🎯 Potential Impact: {insight.impactEstimate}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Model Selection & Input */}
       <div className="p-4 border-t space-y-3">
