@@ -30,6 +30,38 @@ export interface BusinessContext {
       period: string
     }>
   }
+  // Additional properties for conversation manager
+  properties?: number
+  totalIncome?: number
+  avgRent?: number
+  clients?: number
+  activeClients?: number
+  totalClientRevenue?: number
+  avgClientRevenue?: number
+  locations?: number
+  totalContacts?: number
+  totalOpportunities?: number
+  totalConversations?: number
+  avgConversionRate?: number
+  websites?: number
+  liveWebsites?: number
+  subscriptions?: number
+  subscriptionRevenue?: number
+  pendingWorkRequests?: number
+  maintenanceCost?: number
+  clientBreakdown?: any[]
+  locationBreakdown?: any[]
+  allLocations?: any[]
+  totalLocations?: number
+  currentLocationMetrics?: any[]
+  weeklyMetrics?: any[]
+  revenueBreakdown?: {
+    properties: number
+    clients: number
+    subscriptions: number
+    total: number
+  }
+  location?: string
 }
 
 /**
@@ -55,22 +87,22 @@ export function buildBusinessContext(
         // Add current week
         if (metrics?.currentWeek) {
           clientMetrics.push({
-            weekStart: metrics.currentWeek.weekStart,
-            views: metrics.currentWeek.views,
-            leads: metrics.currentWeek.leads,
-            conversions: metrics.currentWeek.conversions,
-            revenue: metrics.currentWeek.revenue,
+            weekStart: metrics.currentWeek.weekStart || "2024-12-16",
+            views: metrics.currentWeek.views || 0,
+            leads: metrics.currentWeek.leads || 0,
+            conversions: metrics.currentWeek.conversions || 0,
+            revenue: metrics.currentWeek.revenue || 0,
           })
         }
 
         // Add last week
         if (metrics?.lastWeek) {
           clientMetrics.push({
-            weekStart: metrics.lastWeek.weekStart,
-            views: metrics.lastWeek.views,
-            leads: metrics.lastWeek.leads,
-            conversions: metrics.lastWeek.conversions,
-            revenue: metrics.lastWeek.revenue,
+            weekStart: metrics.lastWeek.weekStart || "2024-12-09",
+            views: metrics.lastWeek.views || 0,
+            leads: metrics.lastWeek.leads || 0,
+            conversions: metrics.lastWeek.conversions || 0,
+            revenue: metrics.lastWeek.revenue || 0,
           })
         }
 
