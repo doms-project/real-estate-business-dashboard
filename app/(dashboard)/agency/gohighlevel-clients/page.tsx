@@ -336,6 +336,7 @@ export default function GHLClientsPage() {
     // Reset navigation-sensitive state to allow fresh loads
     setHasRefreshedAPIs(false);
     setRetryCount(0);
+    hasLoadedRef.current = false; // Reset smart loading flag for fresh page loads
     console.log('🔄 Reset navigation state for fresh component load');
 
     // Load metrics from Supabase cache (handles 30-min caching automatically)
@@ -577,17 +578,17 @@ export default function GHLClientsPage() {
     // All retries failed
     console.error('❌ Smart loading failed after all retries:', lastError);
     setLocationsLoading(false); // Clear loading state on final failure
-  }, [isRefreshing]);
+  }, [isRefreshing, locationsData]);
 
   // Automatic smart loading on component mount
   useEffect(() => {
-    if (locations.length > 0 && !hasLoadedRef.current) {
+    if (locationsData?.locations && locationsData.locations.length > 0 && !hasLoadedRef.current) {
       console.log('🔄 Dashboard: Smart loading metrics (cache-first approach)...');
       hasLoadedRef.current = true;
       console.log('🚀 Triggering smart data load for all locations...');
       loadMetricsSmart();
     }
-  }, [locations, loadMetricsSmart]);
+  }, [locationsData]); // Depend on locationsData instead of derived locations array
 
   // Subscribe to real-time location metrics updates
   useEffect(() => {
