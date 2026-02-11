@@ -106,21 +106,25 @@ export function EloAiButton() {
 
   useEffect(() => {
     if (user) {
-      // Create context with available page data
+      // Create minimal context - API will fetch real business data based on workspace
       const ctx: BusinessContext = {
         userId: user.id,
         summary: {
-          clients: [],
+          clients: [], // API will populate with real data
         },
-        // Include page data if available
+        // Include page data if available for additional context
         locations: pageData?.totalLocations || 0,
         totalLocations: pageData?.totalLocations || 0,
         allLocations: pageData?.locationsData || [],
+        properties: pageData?.properties || 0,
         // Add other available page data
         ...pageData,
       }
       setContext(ctx)
-      console.log('🤖 ELO AI Button - Created context with pageData:', !!pageData, 'totalLocations:', pageData?.totalLocations)
+      console.log('🤖 ELO AI Button - Created context, API will fetch real data:', {
+        hasPageData: !!pageData,
+        totalLocations: pageData?.totalLocations || 0
+      })
     }
   }, [user, pageData])
 

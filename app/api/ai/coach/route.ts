@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
 import { GoogleGenerativeAI } from "@google/generative-ai"
 import { createClient } from "@supabase/supabase-js"
+import { supabaseAdmin } from "@/lib/supabase"
 import { runSupabaseQuery } from "@/lib/database"
 import { getDatabaseSchema } from "@/lib/database-schema"
 import { getCachedResponse, setCachedResponse } from "@/lib/ai-coach/cache"
@@ -37,16 +38,21 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>()
 // Intent detection for conversational vs business queries
 function detectIntent(message: string): 'greeting' | 'thanks' | 'business' | 'other' {
   const lowerMessage = message.toLowerCase().trim()
+  console.log(`🔍 Intent Detection: Analyzing message: "${message}" -> "${lowerMessage}"`)
 
   // Greetings
   const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'howdy', 'sup', 'yo']
-  if (greetings.some(greeting => lowerMessage === greeting || lowerMessage.startsWith(greeting + ' '))) {
+  const greetingMatch = greetings.find(greeting => lowerMessage === greeting || lowerMessage.startsWith(greeting + ' '))
+  if (greetingMatch) {
+    console.log(`🔍 Intent Detection: MATCHED GREETING: "${greetingMatch}"`)
     return 'greeting'
   }
 
   // Thanks
   const thanks = ['thanks', 'thank you', 'thx', 'ty', 'appreciate it', 'grateful']
-  if (thanks.some(thank => lowerMessage.includes(thank))) {
+  const thanksMatch = thanks.find(thank => lowerMessage.includes(thank))
+  if (thanksMatch) {
+    console.log(`🔍 Intent Detection: MATCHED THANKS: "${thanksMatch}" in "${lowerMessage}"`)
     return 'thanks'
   }
 
@@ -56,13 +62,17 @@ function detectIntent(message: string): 'greeting' | 'thanks' | 'business' | 'ot
     'improve', 'improvement', 'strategy', 'strategic', 'revenue', 'profit',
     'growth', 'performance', 'metrics', 'kpi', 'dashboard', 'report',
     'campaign', 'marketing', 'client', 'customer', 'location', 'property',
-    'website', 'maintenance', 'cost', 'budget', 'roi', 'return', 'investment'
+    'website', 'maintenance', 'cost', 'budget', 'roi', 'return', 'investment',
+    'opportunity', 'count', 'number', 'how many', 'total'
   ]
 
-  if (businessKeywords.some(keyword => lowerMessage.includes(keyword))) {
+  const businessMatch = businessKeywords.find(keyword => lowerMessage.includes(keyword))
+  if (businessMatch) {
+    console.log(`🔍 Intent Detection: MATCHED BUSINESS: "${businessMatch}" in "${lowerMessage}"`)
     return 'business'
   }
 
+  console.log(`🔍 Intent Detection: NO MATCH - CLASSIFIED AS 'other'`)
   return 'other'
 }
 
@@ -100,7 +110,49 @@ function getRateLimitInfo(identifier: string): { remaining: number; resetTime: n
   }
 }
 
-const AI_COACH_SYSTEM_PROMPT = `You are an expert real estate business intelligence AI advisor. Analyze comprehensive business data across properties, clients, locations, marketing, operations, and revenue streams.
+// Dynamic system prompt based on page context
+function getSystemPrompt(pageContext?: string): string {
+  // For agency/marketing pages (GHL clients, campaigns, etc.)
+  if (pageContext === 'agency') {
+    return `CRITICAL: You are a MARKETING AGENCY AI advisor. This business manages MARKETING CLIENTS using GoHighLevel (GHL) CRM software. DO NOT mention properties, rentals, real estate, property management, or housing terms.
+
+BUSINESS TYPE: Marketing Agency specializing in GHL client management and digital marketing services.
+
+Analyze marketing agency data: marketing clients, campaigns, leads, conversions, and marketing revenue.
+
+Focus on MARKETING METRICS:
+- Marketing client acquisition and retention
+- Campaign performance and ROI analysis
+- Lead generation and conversion optimization
+- Marketing service revenue growth
+- Client relationship management for marketing clients
+- Marketing technology and automation efficiency
+
+FORBIDDEN TERMS: Never use "properties", "rentals", "tenants", "property managers", "real estate", "housing", "apartments", "leases", "landlords", or similar real estate terms.
+
+Use MARKETING TERMINOLOGY: "marketing clients", "campaigns", "leads", "conversions", "marketing services", "digital marketing", "CRM clients".
+
+Benchmarks: Lead conversion rates 2-5%, client retention 75-90%, campaign ROI 3-5x, marketing service revenue growth 20-50% annually.
+
+Provide 3-5 strategic insights with specific numbers and actionable marketing recommendations.`
+  }
+
+  // For properties/real estate pages
+  if (pageContext === 'properties') {
+    return `You are an expert real estate business intelligence AI advisor. Analyze comprehensive business data across properties, clients, locations, marketing, operations, and revenue streams.
+
+Provide strategic insights with specific numbers and actionable recommendations. Focus on:
+- Property portfolio optimization
+- Rental income maximization
+- Property management efficiency
+- Real estate market analysis
+- Investment opportunities
+
+Be data-driven, specific with numbers, and provide 3-5 key insights with actionable next steps. Compare to real estate benchmarks where relevant (e.g., occupancy rates 90-95%, rental yields 4-8%, property appreciation 2-5% annually).`
+  }
+
+  // Default/general business context
+  return `You are an expert business intelligence AI advisor. Analyze comprehensive business data across clients, operations, marketing, and revenue streams.
 
 Provide strategic insights with specific numbers and actionable recommendations. Focus on:
 - Growth opportunities and optimization strategies
@@ -109,19 +161,89 @@ Provide strategic insights with specific numbers and actionable recommendations.
 - Operational efficiency improvements
 - Risk mitigation and business development
 
-Be data-driven, specific with numbers, and provide 3-5 key insights with actionable next steps. Compare to industry benchmarks where relevant (e.g., real estate conversion rates typically 1-3%, client retention 70-85%).`
+Be data-driven, specific with numbers, and provide 3-5 key insights with actionable next steps. Adapt your analysis to the specific business context and industry benchmarks.`
+}
 
 // Helper functions for conversation manager
 async function fetchBusinessDataForPage(userId: string, workspaceId: string, pageContext?: string) {
-  // For now, return a basic structure that will be enhanced by the conversation manager
-  return {
-    properties: [],
-    clients: [],
-    locations: [],
-    locationMetrics: [],
-    websites: [],
-    subscriptions: [],
-    workRequests: []
+  if (!supabaseAdmin) {
+    console.error('❌ Supabase admin not configured in AI coach')
+    return {
+      properties: [],
+      clients: [],
+      locations: [],
+      locationMetrics: [],
+      websites: [],
+      subscriptions: [],
+      workRequests: []
+    }
+  }
+
+  try {
+    console.log('🤖 AI Coach: Fetching real business data for workspace:', workspaceId)
+
+    // Fetch real business data from database
+    const [propertiesResult, locationsResult, metricsResult] = await Promise.all([
+      supabaseAdmin
+        .from('properties')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false }),
+
+      supabaseAdmin
+        .from('ghl_locations')
+        .select('*')
+        .eq('is_active', true)
+        .order('name'),
+
+      supabaseAdmin
+        .from('ghl_location_metrics')
+        .select('*')
+        .order('calculated_at', { ascending: false })
+    ])
+
+    // Handle potential errors
+    const properties = propertiesResult.error ? [] : (propertiesResult.data || [])
+    const locations = locationsResult.error ? [] : (locationsResult.data || [])
+    const locationMetrics = metricsResult.error ? [] : (metricsResult.data || [])
+
+    // Convert locations to client format for AI analysis
+    const clients = locations.map((location: any) => ({
+      id: location.id,
+      name: location.name,
+      plan: 'professional',
+      status: 'active',
+      metrics: [] // Will be populated from metrics data
+    }))
+
+    console.log('🤖 AI Coach: Fetched real data:', {
+      propertiesCount: properties.length,
+      locationsCount: locations.length,
+      metricsCount: locationMetrics.length,
+      clientsCount: clients.length,
+      workspaceId
+    })
+
+    return {
+      properties,
+      clients,
+      locations,
+      locationMetrics,
+      websites: [], // TODO: Add website queries when table is implemented
+      subscriptions: [], // TODO: Add subscription queries when table is implemented
+      workRequests: [] // TODO: Add work request queries when table is implemented
+    }
+  } catch (error) {
+    console.error('❌ AI Coach: Failed to fetch business data:', error)
+    return {
+      properties: [],
+      clients: [],
+      locations: [],
+      locationMetrics: [],
+      websites: [],
+      subscriptions: [],
+      workRequests: []
+    }
   }
 }
 
@@ -167,22 +289,43 @@ function buildContextForPage(userId: string, workspaceId: string, businessData: 
 }
 
 function buildAIContextString(aiContext: any): string {
-  const { businessData, conversationHistory, userPreferences, proactiveInsights } = aiContext
+  const { businessData, conversationHistory, userPreferences, proactiveInsights, pageContext } = aiContext
+
+  // Determine business type based on page context
+  const businessType = pageContext === 'agency'
+    ? "MARKETING AGENCY specializing in GoHighLevel (GHL) client management"
+    : pageContext === 'properties'
+    ? "REAL ESTATE business managing rental properties"
+    : "BUSINESS with multiple operational areas"
 
   const contextParts = [
     "**ELO BUSINESS INTELLIGENCE CONTEXT:**",
+    `**BUSINESS TYPE: ${businessType}**`,
     "",
     "**CURRENT BUSINESS STATE:**",
-    `• ${businessData.summary.totalProperties} properties generating $${businessData.financial.monthlyRentIncome.toLocaleString()}/month`,
-    `• ${businessData.summary.totalClients} clients across ${businessData.summary.totalLocations} locations`,
-    `• ${businessData.performance.totalContacts} contacts, ${businessData.performance.totalOpportunities} opportunities`,
-    `• ${businessData.performance.totalConversations} conversations with ${Math.round(businessData.performance.avgHealthScore)}% avg health score`,
-    `• ${businessData.summary.liveWebsites}/${businessData.summary.totalWebsites || 0} live websites`,
+    pageContext === 'agency' ? [
+      `• ${businessData.summary.totalClients} marketing clients across ${businessData.summary.totalLocations} locations`,
+      `• ${businessData.performance.totalContacts} leads/contacts, ${businessData.performance.totalOpportunities} opportunities`,
+      `• ${businessData.performance.totalConversations} client conversations`,
+      `• ${businessData.summary.liveWebsites}/${businessData.summary.totalWebsites || 0} active client websites`
+    ] : [
+      `• ${businessData.summary.totalProperties} properties generating $${businessData.financial.monthlyRentIncome.toLocaleString()}/month`,
+      `• ${businessData.summary.totalClients} clients across ${businessData.summary.totalLocations} locations`,
+      `• ${businessData.performance.totalContacts} contacts, ${businessData.performance.totalOpportunities} opportunities`,
+      `• ${businessData.performance.totalConversations} conversations with ${Math.round(businessData.performance.avgHealthScore)}% avg health score`,
+      `• ${businessData.summary.liveWebsites}/${businessData.summary.totalWebsites || 0} live websites`
+    ].flat(),
     "",
     "**FINANCIAL OVERVIEW:**",
-    `• Total revenue: $${(businessData.financial.monthlyRentIncome + businessData.financial.subscriptionRevenue).toLocaleString()}/month`,
-    `• Portfolio value: $${businessData.financial.portfolioValue.toLocaleString()}`,
-    `• Marketing spend: $${businessData.financial.campaignSpend.toLocaleString()}`,
+    pageContext === 'agency' ? [
+      `• Monthly marketing service revenue: $${(businessData.financial.monthlyRentIncome + businessData.financial.subscriptionRevenue).toLocaleString()}`,
+      `• Client portfolio value: $${businessData.financial.portfolioValue.toLocaleString()}`,
+      `• Marketing technology investments: $${businessData.financial.campaignSpend.toLocaleString()}`
+    ] : [
+      `• Total revenue: $${(businessData.financial.monthlyRentIncome + businessData.financial.subscriptionRevenue).toLocaleString()}/month`,
+      `• Portfolio value: $${businessData.financial.portfolioValue.toLocaleString()}`,
+      `• Marketing spend: $${businessData.financial.campaignSpend.toLocaleString()}`
+    ].flat(),
     "",
     "**USER PREFERENCES:**",
     `• Expertise level: ${userPreferences.expertiseLevel}`,
@@ -265,18 +408,24 @@ async function generateAIResponse(
     return "I'm having trouble connecting to my AI services right now. Please check your API configuration."
   }
 
-  // Check intent before AI processing
-  const intent = detectIntent(message)
-  console.log(`🎯 Detected intent: ${intent} for message: "${message}"`)
+    // Check intent before AI processing
+    const intent = detectIntent(message)
+    console.log(`🎯 Detected intent: ${intent} for message: "${message}"`)
 
-  // Handle conversational intents with simple responses
-  if (intent === 'greeting') {
-    return `Hello! 👋 I'm your AI business advisor for real estate. I can help you analyze your properties, clients, campaigns, and growth opportunities. What would you like to know about your business today?`
-  }
+    // Handle conversational intents with simple responses
+    if (intent === 'greeting') {
+      console.log(`🎯 Returning greeting response`)
+      return `Hello! 👋 I'm your AI business advisor for real estate. I can help you analyze your properties, clients, campaigns, and growth opportunities. What would you like to know about your business today?`
+    }
 
-  if (intent === 'thanks') {
-    return `You're welcome! 😊 I'm here whenever you need insights about your real estate business. Feel free to ask about properties, clients, marketing campaigns, or growth strategies.`
-  }
+    // Extra safety check for thanks detection - prevent false positives
+    if (intent === 'thanks' && !message.toLowerCase().includes('thank') && !message.toLowerCase().includes('appreciate')) {
+      console.log(`🎯 Thanks intent detected but no thanks keywords found - reclassifying as business`)
+      // Reclassify as business if it was incorrectly detected as thanks
+    } else if (intent === 'thanks') {
+      console.log(`🎯 Returning thanks response`)
+      return `You're welcome! 😊 I'm here whenever you need insights about your real estate business. Feel free to ask about properties, clients, marketing campaigns, or growth strategies.`
+    }
 
   // AI processing with multi-model support (OpenRouter first, Gemini fallback)
   try {
@@ -288,7 +437,7 @@ async function generateAIResponse(
           const messages: OpenRouterMessage[] = [
             {
               role: "system",
-              content: `${AI_COACH_SYSTEM_PROMPT}\n\n${businessContext}`
+              content: `${getSystemPrompt(pageContext)}\n\n${businessContext}`
             },
             {
               role: "user",
@@ -343,7 +492,7 @@ async function generateAIResponse(
           const genAI = new GoogleGenerativeAI(geminiApiKey);
           const model = genAI.getGenerativeModel({ model: requestedModel || "gemini-2.0-flash-lite" });
 
-          const analysisPrompt = `${AI_COACH_SYSTEM_PROMPT}\n\n${businessContext}\n\n**USER QUERY:** ${message}\n\n**INSTRUCTIONS:**\nThis is a business analysis query. Provide 3-5 strategic insights specific to the user's question. Use their actual business data above to give concrete, actionable advice with specific numbers. Focus on their current metrics and opportunities for growth. Compare to industry benchmarks where relevant.`;
+              const analysisPrompt = `${getSystemPrompt(pageContext)}\n\n${businessContext}\n\n**USER QUERY:** ${message}\n\n**INSTRUCTIONS:**\nThis is a business analysis query. Provide 3-5 strategic insights specific to the user's question. Use their actual business data above to give concrete, actionable advice with specific numbers. Focus on their current metrics and opportunities for growth. Compare to industry benchmarks where relevant.`;
 
           const result = await model.generateContent(analysisPrompt);
           const response = await result.response;
@@ -492,16 +641,20 @@ export async function POST(request: NextRequest) {
 
     console.log(`🚀 Processing AI request for: ${pageContext}`)
 
-    // Check cache first
-    const cacheKey = `${workspaceId}:${pageContext || 'general'}:${message}`
+    // Check cache first (include version to invalidate old cached responses after fixes)
+    const CACHE_VERSION = 'v3' // Updated for marketing agency context fixes
+    const cacheKey = `${CACHE_VERSION}:${workspaceId}:${pageContext || 'general'}:${message}`
+    console.log(`🔍 Cache Check: Key="${cacheKey}", User="${userId}"`)
     const cached = getCachedResponse(userId, cacheKey)
     if (cached) {
+      console.log(`🔍 Cache HIT: Returning cached response: "${cached.response.substring(0, 50)}..."`)
       return NextResponse.json({
         reply: cached.response,
         cached: true,
         conversationId: cached.conversationId
       })
     }
+    console.log(`🔍 Cache MISS: Processing new request`)
 
     // Initialize conversation manager
     const conversationManager = new ConversationManager()
@@ -517,14 +670,23 @@ export async function POST(request: NextRequest) {
     let currentBusinessContext: any = {}
 
     try {
+      console.log(`🔍 Fetching business data: userId=${userId}, workspaceId=${workspaceId}, pageContext=${pageContext}`)
       // Get business data based on page context
       const businessData = await fetchBusinessDataForPage(userId, workspaceId, pageContext)
+      console.log(`🔍 Business data fetched:`, {
+        properties: businessData.properties?.length || 0,
+        clients: businessData.clients?.length || 0,
+        locations: businessData.locations?.length || 0,
+        hasMetrics: !!businessData.locationMetrics?.length
+      })
       currentBusinessContext = buildContextForPage(userId, workspaceId, businessData, pageContext)
+      console.log(`🔍 Business context built:`, currentBusinessContext)
     } catch (error) {
-      console.error('Error fetching business data:', error)
+      console.error('❌ Error fetching business data:', error)
       currentBusinessContext = { error: 'Unable to fetch current business data' }
     }
 
+    console.log(`🔍 Processing message with conversation manager: "${message}"`)
     // Process message with conversation manager
     const {
       enrichedContext,
@@ -536,6 +698,11 @@ export async function POST(request: NextRequest) {
       message,
       currentBusinessContext
     )
+    console.log(`🔍 Conversation manager processed:`, {
+      enrichedContextKeys: Object.keys(enrichedContext),
+      relevantHistoryCount: relevantHistory.length,
+      proactiveInsightsCount: proactiveInsights.length
+    })
 
     // Build comprehensive context for AI
     const aiContext = {
@@ -575,6 +742,9 @@ export async function POST(request: NextRequest) {
       enrichedContext
     )
 
+    // Get intent for logging (since it's detected inside generateAIResponse)
+    const detectedIntent = detectIntent(message)
+
     // Save AI response to conversation
     await conversationManager.saveMessage(
       conversationState.conversationId,
@@ -587,7 +757,7 @@ export async function POST(request: NextRequest) {
       }
     )
 
-    console.log(`📤 AI Coach Response: Page=${pageContext} | Reply length: ${reply.length} | Cached: false`);
+    console.log(`📤 AI Coach Final Response: intent=${detectedIntent}, provider='ai-coach', replyLength=${reply.length}`)
 
     return NextResponse.json({
       reply,
@@ -597,7 +767,17 @@ export async function POST(request: NextRequest) {
       provider: 'ai-coach',
       model: requestedModel || 'auto',
       proactiveInsights: proactiveInsights.slice(0, 3), // Top 3 insights
-      conversationSummary: conversationState.summary
+      conversationSummary: conversationState.summary,
+      // Debug info
+      debug: {
+        intent: detectedIntent,
+        originalMessage: message,
+        businessDataCount: {
+          properties: currentBusinessContext.properties?.length || 0,
+          clients: currentBusinessContext.clients?.length || 0,
+          locations: currentBusinessContext.locations?.length || 0
+        }
+      }
     })
   } catch (error) {
     console.error("AI Coach API error:", error)
