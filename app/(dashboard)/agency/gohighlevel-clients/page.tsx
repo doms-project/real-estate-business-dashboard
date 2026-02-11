@@ -10,6 +10,7 @@ import { useUser } from "@clerk/nextjs"
 // import { useGHLData } from "@/hooks/use-ghl-data"
 import { SubscriptionPlan, GoHighLevelClient, ClientMetrics } from "@/types/gohighlevel"
 import { subscribeToUpdates, initializeRealtimeUpdates } from "@/lib/realtime-updates"
+import { usePageData } from "@/components/layout/page-data-context"
 
 // Location data interface
 interface GHLLocation {
@@ -127,6 +128,7 @@ function LocationCard({ location, metrics, router }: { location: GHLLocation, me
 
 export default function GHLClientsPage() {
   const { user } = useUser()
+  const { setPageData } = usePageData()
   const router = useRouter()
   const [isModalOpen, setIsModalOpen] = useState(false)
 
@@ -255,6 +257,15 @@ export default function GHLClientsPage() {
         setLocationsData(data)
         setLocationsLoading(false) // Ensure loading state is cleared on success
         console.log('📍 Dashboard - State updates called, locationsData should update')
+
+        // Set page data for AI coach
+        const pageData = {
+          totalLocations: data.locations?.length || 0,
+          locationsData: data.locations || [],
+          // Add any other relevant metrics for AI coach
+        }
+        setPageData(pageData)
+        console.log('🤖 GHL Clients page - Set pageData for AI coach:', pageData)
 
         // No sessionStorage caching needed - locations are cached in component state
 

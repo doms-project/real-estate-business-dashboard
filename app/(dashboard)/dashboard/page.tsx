@@ -116,12 +116,14 @@ export default function DashboardPage() {
   const { currentWorkspace } = useWorkspace()
   const [context, setContext] = useState<any>(null)
   const [locationsData, setLocationsData] = useState<any>(null)
+  const [metricsData, setMetricsData] = useState<any>(null)
   const [activities, setActivities] = useState<Activity[]>([])
   const [teamMemberCount, setTeamMemberCount] = useState<number>(0)
   const [propertyCount, setPropertyCount] = useState<number>(0)
   const [loadingTeamMembers, setLoadingTeamMembers] = useState(true)
   const [loadingProperties, setLoadingProperties] = useState(true)
   const [loadingLocations, setLoadingLocations] = useState(true)
+  const [loadingMetrics, setLoadingMetrics] = useState(true)
 
 
   // Fetch real data from GHL
@@ -148,6 +150,27 @@ export default function DashboardPage() {
       loadLocations()
     }
   }, [user])
+
+  // Load metrics data for AI coach
+  useEffect(() => {
+    const loadMetrics = async () => {
+      try {
+        setLoadingMetrics(true)
+        const response = await fetch('/api/ghl/metrics/cached')
+        const result = await response.json()
+        setMetricsData(result)
+      } catch (error) {
+        console.error('Failed to load metrics:', error)
+        setMetricsData({ data: [] })
+      } finally {
+        setLoadingMetrics(false)
+      }
+    }
+
+    if (user && currentWorkspace) {
+      loadMetrics()
+    }
+  }, [user, currentWorkspace])
 
   // Load team member count
   useEffect(() => {
@@ -267,12 +290,100 @@ export default function DashboardPage() {
   }, [locationsData])
 
   useEffect(() => {
-    // Temporarily use mock user ID for development
-    const mockUserId = "user_123"
-    const userClients = mockClients.filter((c) => c.affiliateUserId === mockUserId)
-    const ctx = buildDashboardContext(mockUserId, userClients, mockMetrics)
-    setContext(ctx)
-  }, [])
+    // Build AI coach context using real data instead of mock data
+    if (!user?.id || !locationsData?.locations || !currentWorkspace) {
+      return
+    }
+
+    try {
+      // Convert real GHL locations to GoHighLevelClient format
+      const realClients: GoHighLevelClient[] = (locationsData.locations || []).map((location: any) => ({
+        id: location.id,
+        name: location.name,
+        email: location.email || `${location.name.toLowerCase().replace(/\s+/g, '')}@example.com`,
+        phone: location.phone || '',
+        company: location.name,
+        subscriptionPlan: 'professional', // Default plan since we don't track this in locations
+        affiliateUserId: user.id,
+        createdAt: location.created_at || '2024-01-01',
+        updatedAt: new Date().toISOString(),
+        status: 'active',
+      }))
+
+      // Convert real metrics data to ClientMetrics format
+      const realMetrics: Record<string, ClientMetrics> = {}
+      const metricsArray = metricsData?.data || []
+
+      // Build metrics map for each location
+      for (const metric of metricsArray) {
+        const locationId = metric.location_id
+        if (locationId) {
+          realMetrics[locationId] = {
+            clientId: locationId,
+            currentWeek: {
+              clientId: locationId,
+              weekStart: new Date().toISOString().slice(0, 10),
+              weekEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+              views: metric.contacts_count || 0,
+              leads: metric.opportunities_count || 0,
+              conversions: Math.round((metric.opportunities_count || 0) * 0.1), // Estimate conversions
+              revenue: 0, // Could be enhanced with real revenue data
+            },
+            lastWeek: {
+              clientId: locationId,
+              weekStart: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+              weekEnd: new Date().toISOString().slice(0, 10),
+              views: Math.round((metric.contacts_count || 0) * 0.9),
+              leads: Math.round((metric.opportunities_count || 0) * 0.9),
+              conversions: Math.round((metric.opportunities_count || 0) * 0.09),
+              revenue: 0,
+            },
+            thisMonth: {
+              views: metric.contacts_count || 0,
+              leads: metric.opportunities_count || 0,
+              conversions: Math.round((metric.opportunities_count || 0) * 0.1),
+              revenue: 0,
+            },
+            allTime: {
+              views: metric.contacts_count || 0,
+              leads: metric.opportunities_count || 0,
+              conversions: Math.round((metric.opportunities_count || 0) * 0.1),
+              revenue: 0,
+            },
+          }
+        }
+      }
+
+      // Build context with real data
+      const ctx = buildDashboardContext(user.id, realClients, realMetrics)
+
+      // Add additional real business data to the context
+      ctx.properties = propertyCount
+      ctx.locations = locationsData.locations.length
+      ctx.totalLocations = locationsData.locations.length
+      ctx.allLocations = locationsData.locations
+      ctx.clients = realClients.length
+      ctx.activeClients = realClients.filter(c => c.status === 'active').length
+
+      // Add basic financial data if available
+      ctx.totalIncome = 0 // Could be enhanced with real revenue data
+      ctx.subscriptionRevenue = 0 // Could be enhanced with real subscription data
+
+      setContext(ctx)
+
+      console.log('🤖 Dashboard AI Context: Built with real data', {
+        clientCount: realClients.length,
+        locationCount: locationsData.locations.length,
+        propertyCount: propertyCount,
+        userId: user.id,
+        workspaceId: currentWorkspace.id
+      })
+    } catch (error) {
+      console.error('Failed to build AI coach context:', error)
+      // Fallback to empty context
+      setContext(buildDashboardContext(user.id, [], {}))
+    }
+  }, [user?.id, locationsData?.locations, currentWorkspace, propertyCount, metricsData])
   return (
     <div className="p-6 space-y-8 bg-gray-50/30 min-h-screen">
       {/* Header */}
