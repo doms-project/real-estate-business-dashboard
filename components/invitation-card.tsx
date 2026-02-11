@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { useUser } from "@clerk/nextjs"
+import { useUser, useClerk } from "@clerk/nextjs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +41,7 @@ export function InvitationCard({
 }: InvitationCardProps) {
   const router = useRouter()
   const { user } = useUser()
+  const { session } = useClerk()
   const [processing, setProcessing] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [wrongEmail, setWrongEmail] = useState<string | null>(null)
@@ -71,6 +72,7 @@ export function InvitationCard({
 
       if (acceptResponse.status === 403) {
         // Wrong email - show specific error
+        console.log('❌ Wrong email for invitation:', acceptData.error)
         setWrongEmail(acceptData.error)
         return
       }
@@ -78,6 +80,8 @@ export function InvitationCard({
       if (!acceptResponse.ok) {
         throw new Error(acceptData.error || 'Failed to accept invitation')
       }
+
+      console.log('✅ Invitation accepted successfully:', acceptData)
 
       if (showToast) {
         toast({
@@ -90,9 +94,19 @@ export function InvitationCard({
       if (onSuccess) {
         onSuccess()
       } else if (variant === 'page') {
-        // Redirect to dashboard after a short delay for page variant
-        setTimeout(() => {
-          router.push('/dashboard')
+        // Force Clerk session refresh before redirecting to ensure authentication state is updated
+        setTimeout(async () => {
+          try {
+            // Refresh Clerk session to ensure it's recognized
+            if (session) {
+              await session.reload()
+            }
+            router.push('/dashboard')
+          } catch (error) {
+            console.error('Session refresh failed, redirecting to sign-in:', error)
+            // Fallback: redirect through sign-in flow
+            router.push('/sign-in?redirect_url=/dashboard')
+          }
         }, 1500)
       } else {
         // Reload page for modal variant

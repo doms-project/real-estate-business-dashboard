@@ -60,6 +60,20 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
       topSourcePct: pageData.leadSources?.sources?.[0]?.percentage || 0
     }
 
+    // Special handling for locations with zero activity
+    if (keyMetrics.contacts === 0 && keyMetrics.opportunities === 0 && keyMetrics.conversations === 0) {
+      return `Location ${locationName} has ZERO client activity: 0 contacts, 0 opportunities, 0 conversations, ${keyMetrics.healthScore}% health score.
+
+This location is completely dormant and needs immediate activation. Provide 3 specific, actionable recommendations:
+
+1. LEAD CAPTURE: Deploy a location-specific landing page with contact form and automated lead nurturing sequence
+2. LOCAL MARKETING: Launch targeted advertising campaign (Google Local Service Ads, Facebook local ads) with location-specific messaging
+3. NETWORKING STRATEGY: Reach out to 20-30 local businesses/partners in the ${locationName} area for referral partnerships
+
+Format as JSON array with practical, implementable actions:
+[{"type":"opportunity","title":"Quick Win Action","description":"Immediate 1-week action that can generate first leads","priority":"high","metrics":["timeline","cost","expected_results"]},{"type":"recommendation","title":"Marketing Campaign","description":"30-day marketing strategy for location activation","priority":"high","metrics":["channels","budget","goals"]},{"type":"warning","title":"Partnership Development","description":"Long-term strategy for local business relationships","priority":"medium","metrics":["targets","approach","timeline"]}]`
+    }
+
     return `Analyze ${locationName}: ${keyMetrics.contacts} contacts, ${keyMetrics.opportunities} opps, ${keyMetrics.healthScore}% health, top source: ${keyMetrics.topSource} (${keyMetrics.topSourcePct}%).
 
 Return 2-3 insights as JSON array:
@@ -89,7 +103,38 @@ Return 2-3 insights as JSON array:
       console.warn('Compact parsing failed:', e instanceof Error ? e.message : String(e))
     }
 
-    // Minimal fallback for free model limits
+    // Enhanced fallback for zero-activity locations
+    const hasZeroActivity = (pageData.contacts || 0) === 0 &&
+                           (pageData.opportunities || 0) === 0 &&
+                           (pageData.conversations || 0) === 0
+
+    if (hasZeroActivity) {
+      return [
+        {
+          type: 'opportunity' as const,
+          title: 'Location Activation Required',
+          description: `${locationName} has zero client activity. Immediate lead generation setup needed.`,
+          priority: 'high' as const,
+          metrics: ['contacts', 'opportunities', 'conversations']
+        },
+        {
+          type: 'recommendation' as const,
+          title: 'Lead Capture Setup',
+          description: 'Deploy landing page with contact form and automated follow-up sequence.',
+          priority: 'high' as const,
+          metrics: ['landing_page', 'contact_form', 'automation']
+        },
+        {
+          type: 'warning' as const,
+          title: 'Marketing Campaign Needed',
+          description: 'Launch local advertising campaign to drive traffic to lead capture assets.',
+          priority: 'medium' as const,
+          metrics: ['local_ads', 'social_media', 'email_marketing']
+        }
+      ]
+    }
+
+    // Minimal fallback for locations with some activity
     return [{
       type: 'performance' as const,
       title: 'Performance Summary',
@@ -97,7 +142,7 @@ Return 2-3 insights as JSON array:
       priority: 'medium' as const,
       metrics: ['contacts', 'healthScore']
     }]
-  }, [locationName, pageData.contacts, pageData.healthScore])
+  }, [locationName, pageData.contacts, pageData.opportunities, pageData.conversations, pageData.healthScore])
 
   const generateInsights = useCallback(async (useCustomPrompt = false) => {
     console.log('🔍 LocationAIInsights: generateInsights called with useCustomPrompt:', useCustomPrompt)
@@ -377,6 +422,11 @@ Return 2-3 insights as JSON array:
             </CardTitle>
             <CardDescription>
               Intelligent analysis of {locationName} performance and opportunities
+              {(pageData.contacts || 0) === 0 && (pageData.opportunities || 0) === 0 && (pageData.conversations || 0) === 0 && (
+                <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-800">
+                  ⚠️ Zero Activity - Action Required
+                </span>
+              )}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
