@@ -22,6 +22,7 @@ const publicRoutes = bypassAuth ? [
   '/api/ghl/locations', // Allow access to GHL locations
   '/api/ghl/metrics(.*)', // Allow access to metrics APIs
   '/api/analytics/script', // Allow public access to analytics script for external websites
+  '/api/analytics', // Allow public access to analytics API for tracking data
   '/api/ai/business-insights', // Allow access to AI business insights
 ];
 

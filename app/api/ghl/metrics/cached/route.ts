@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import { auth } from '@clerk/nextjs/server'
 import { activityTracker } from '@/lib/activity-tracker'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   try {
     console.log('🔧 Environment check:')
