@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, usePathname } from "next/navigation"
+import { useParams, usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useUser } from "@clerk/nextjs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,6 +12,7 @@ import { InvitationCard } from "@/components/invitation-card"
 export default function InvitePage() {
   const params = useParams()
   const pathname = usePathname()
+  const router = useRouter()
   const { user, isLoaded } = useUser()
   const token = params?.token as string
   const [loading, setLoading] = useState(true)
@@ -47,6 +48,18 @@ export default function InvitePage() {
   }, [token])
 
   if (!isLoaded) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  // If user is not authenticated, redirect to sign-in with invitation token
+  if (!user) {
+    const signInUrl = `/sign-in?invitation_token=${encodeURIComponent(token)}`
+    console.log('🔄 User not authenticated, redirecting to:', signInUrl)
+    router.push(signInUrl)
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

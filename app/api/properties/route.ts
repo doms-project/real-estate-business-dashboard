@@ -126,9 +126,15 @@ export async function POST(request: NextRequest) {
         }
         targetWorkspaceId = workspaceId
       } else {
-        // If no workspaceId provided, get/create user's default workspace
-        const workspace = await getOrCreateUserWorkspace(userId)
-        targetWorkspaceId = workspace.id
+        // If no workspaceId provided, check user's workspaces
+        const userWorkspaces = await getUserWorkspaces(userId)
+        if (userWorkspaces.length === 0) {
+          return NextResponse.json(
+            { error: 'No workspace access. You must be invited to a workspace first.' },
+            { status: 403 }
+          )
+        }
+        targetWorkspaceId = userWorkspaces[0].id
       }
     } catch (workspaceError: any) {
       // If workspace system fails, allow with null workspace_id (legacy support)

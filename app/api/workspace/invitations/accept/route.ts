@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
     // Mark invitation as accepted
     const { error: updateError } = await supabaseAdmin
       .from('invitations')
-      .update({ 
+      .update({
         status: 'accepted',
         accepted_at: new Date().toISOString()
       })
@@ -151,6 +151,33 @@ export async function POST(request: NextRequest) {
     if (updateError) {
       console.error('Error updating invitation:', updateError)
       // Don't fail the request, member was already added
+    }
+
+    // Update Clerk user metadata to mark invitation as accepted (REQUIRED)
+    const { clerkClient } = await import('@clerk/nextjs/server')
+    try {
+      await clerkClient.users.updateUser(userId, {
+        publicMetadata: {
+          invitation_id: invitation.id,
+          workspace_id: invitation.workspace_id,
+          invitation_status: 'accepted',
+          invited_email: invitation.email,
+          invited_role: invitation.role,
+          accepted_at: new Date().toISOString()
+        }
+      })
+      console.log(`📝 Updated Clerk metadata for user ${userId} - invitation accepted`)
+    } catch (metadataError) {
+      console.error('❌ CRITICAL: Failed to update Clerk user metadata:', metadataError)
+      // This is critical - if metadata update fails, the invitation acceptance should fail
+      // to prevent users from being in accepted state in DB but pending in Clerk
+      return NextResponse.json(
+        {
+          error: 'Failed to update user status',
+          details: 'Invitation was accepted but user status could not be updated. Please try again or contact support.'
+        },
+        { status: 500 }
+      )
     }
 
     // Get workspace name
@@ -258,7 +285,22 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ 
+    // Update Clerk user metadata to mark invitation as declined (if they had one)
+    try {
+      const { clerkClient } = await import('@clerk/nextjs/server')
+      await clerkClient.users.updateUser(userId, {
+        publicMetadata: {
+          invitation_status: 'declined',
+          declined_at: new Date().toISOString()
+        }
+      })
+      console.log(`📝 Updated Clerk metadata for user ${userId} - invitation declined`)
+    } catch (metadataError) {
+      console.error('Failed to update Clerk user metadata:', metadataError)
+      // Don't fail the request if metadata update fails
+    }
+
+    return NextResponse.json({
       success: true,
       message: 'Invitation declined'
     })

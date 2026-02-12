@@ -26,12 +26,25 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const workspace = await getOrCreateUserWorkspace(userId)
+    // First, check if user has any existing workspaces
     const workspaces = await getUserWorkspaces(userId)
 
-    return NextResponse.json({ 
+    if (workspaces.length === 0) {
+      // User has no workspace access - don't create one automatically
+      console.log('User has no workspace access, not creating workspace automatically')
+      return NextResponse.json({
+        workspace: null,
+        workspaces: [],
+        message: "You don't have access to any workspaces"
+      })
+    }
+
+    // User has workspaces - use the first one as default
+    const workspace = workspaces[0]
+
+    return NextResponse.json({
       workspace,
-      workspaces 
+      workspaces
     })
   } catch (error: any) {
     console.error('Error in GET /api/workspace:', error)

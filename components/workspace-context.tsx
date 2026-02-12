@@ -15,6 +15,7 @@ interface WorkspaceContextType {
   currentWorkspace: Workspace | null
   availableWorkspaces: Workspace[]
   loading: boolean
+  hasWorkspaceAccess: boolean
   setCurrentWorkspace: (workspace: Workspace) => void
   refreshWorkspaces: () => Promise<void>
   workspaceSwitchCount: number // Increments on workspace switches to trigger re-renders
@@ -27,6 +28,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null)
   const [availableWorkspaces, setAvailableWorkspaces] = useState<Workspace[]>([])
   const [loading, setLoading] = useState(true)
+  const [hasWorkspaceAccess, setHasWorkspaceAccess] = useState(false)
   const [workspaceSwitchCount, setWorkspaceSwitchCount] = useState(0)
 
   // Load workspaces and set current workspace
@@ -39,28 +41,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const data = await response.json()
 
       if (response.ok) {
-        setAvailableWorkspaces(data.workspaces || [])
+        const userWorkspaces = data.workspaces || []
+        setAvailableWorkspaces(userWorkspaces)
 
-        // Check if we have a saved workspace preference
-        const savedWorkspaceId = localStorage.getItem(`workspace_${user.id}`)
-        let workspaceToSelect = data.workspace // Default to auto-assigned
+        if (userWorkspaces.length === 0) {
+          // User has no workspace access
+          setCurrentWorkspace(null)
+          setHasWorkspaceAccess(false)
+          console.log('User has no workspace access')
+        } else {
+          setHasWorkspaceAccess(true)
+          // Check if we have a saved workspace preference
+          const savedWorkspaceId = localStorage.getItem(`workspace_${user.id}`)
+          let workspaceToSelect = data.workspace // Default to auto-assigned
 
-        // Prioritize the workspace with activities (467e72e9-0643-4296-ad5b-f3dd5544d26e)
-        const activitiesWorkspaceId = '467e72e9-0643-4296-ad5b-f3dd5544d26e'
-        const activitiesWorkspace = data.workspaces?.find((w: Workspace) => w.id === activitiesWorkspaceId)
-        if (activitiesWorkspace) {
-          workspaceToSelect = activitiesWorkspace
-          console.log('🎯 Using workspace with activities:', activitiesWorkspaceId)
-        }
-        // If user has a saved preference and it's not the activities workspace, use it
-        else if (savedWorkspaceId) {
-          const savedWorkspace = data.workspaces?.find((w: Workspace) => w.id === savedWorkspaceId)
-          if (savedWorkspace) {
-            workspaceToSelect = savedWorkspace
+          // Prioritize the workspace with activities (467e72e9-0643-4296-ad5b-f3dd5544d26e)
+          const activitiesWorkspaceId = '467e72e9-0643-4296-ad5b-f3dd5544d26e'
+          const activitiesWorkspace = userWorkspaces.find((w: Workspace) => w.id === activitiesWorkspaceId)
+          if (activitiesWorkspace) {
+            workspaceToSelect = activitiesWorkspace
+            console.log('🎯 Using workspace with activities:', activitiesWorkspaceId)
           }
-        }
+          // If user has a saved preference and it's not the activities workspace, use it
+          else if (savedWorkspaceId) {
+            const savedWorkspace = userWorkspaces.find((w: Workspace) => w.id === savedWorkspaceId)
+            if (savedWorkspace) {
+              workspaceToSelect = savedWorkspace
+            }
+          }
 
-        setCurrentWorkspace(workspaceToSelect)
+          setCurrentWorkspace(workspaceToSelect)
+        }
       }
     } catch (error) {
       console.error('Failed to load workspaces:', error)
@@ -86,6 +97,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } else {
       setCurrentWorkspace(null)
       setAvailableWorkspaces([])
+      setHasWorkspaceAccess(false)
       setLoading(false)
     }
   }, [user, refreshWorkspaces])
@@ -94,6 +106,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     currentWorkspace,
     availableWorkspaces,
     loading,
+    hasWorkspaceAccess,
     setCurrentWorkspace: handleSetCurrentWorkspace,
     refreshWorkspaces,
     workspaceSwitchCount
