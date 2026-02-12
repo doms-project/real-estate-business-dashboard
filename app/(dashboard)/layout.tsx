@@ -25,6 +25,39 @@ function WorkspaceAccessGuard({ children }: { children: React.ReactNode }) {
   const [pendingInvitations, setPendingInvitations] = useState([])
   const [showInvitationAcceptance, setShowInvitationAcceptance] = useState(false)
 
+  // Check if current page requires workspace validation
+  const requiresWorkspaceAccess = () => {
+    if (typeof window === 'undefined') return true // SSR - require validation
+
+    const currentPath = window.location.pathname
+
+    // Location pages are global - no workspace validation needed
+    if (currentPath.includes('/agency/gohighlevel-clients')) {
+      console.log('🎯 Location page detected - skipping workspace validation')
+      return false
+    }
+
+    // Analytics and insights pages are global
+    if (currentPath.includes('/analytics') || currentPath.includes('/insights')) {
+      console.log('📊 Analytics/insights page detected - skipping workspace validation')
+      return false
+    }
+
+    // Workspace-specific pages require validation
+    const workspacePages = [
+      '/workspace',
+      '/settings',
+      '/team',
+      '/billing',
+      '/admin'
+    ]
+
+    const requiresValidation = workspacePages.some(page => currentPath.includes(page))
+    console.log('🔐 Page validation check:', { currentPath, requiresValidation })
+
+    return requiresValidation
+  }
+
   // Check invitation status dynamically if not in metadata
   useEffect(() => {
     if (user?.emailAddresses?.[0]?.emailAddress && !checkingInvitation && !invitationChecked) {
@@ -121,13 +154,17 @@ function WorkspaceAccessGuard({ children }: { children: React.ReactNode }) {
     }
   }
 
-  if (loading || checkingInvitation) {
+  // Check if this page requires workspace validation
+  const needsWorkspaceValidation = requiresWorkspaceAccess()
+
+  if ((loading && needsWorkspaceValidation) || checkingInvitation) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center space-y-4">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
           <p className="text-muted-foreground">
-            {checkingInvitation ? 'Checking invitation status...' : 'Loading workspace access...'}
+            {checkingInvitation ? 'Checking invitation status...' :
+             needsWorkspaceValidation ? 'Loading workspace access...' : 'Loading...'}
           </p>
         </div>
       </div>
@@ -138,7 +175,7 @@ function WorkspaceAccessGuard({ children }: { children: React.ReactNode }) {
   const userMetadata = (user as any)?.publicMetadata || {}
   const invitationStatus = userMetadata.invitation_status
 
-  if (!hasWorkspaceAccess || invitationStatus !== 'accepted') {
+  if (needsWorkspaceValidation && (!hasWorkspaceAccess || invitationStatus !== 'accepted')) {
     const isPending = invitationStatus === 'pending'
     const isDeclined = invitationStatus === 'declined'
     const noInvitation = !invitationStatus || invitationStatus === 'none'

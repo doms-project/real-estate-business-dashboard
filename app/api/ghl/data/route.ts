@@ -6,39 +6,7 @@ import { activityTracker } from '@/lib/activity-tracker'
 
 export const dynamic = 'force-dynamic'
 
-// Cache for workspace validation to avoid repeated DB queries
-const WORKSPACE_CACHE = new Map<string, { workspaces: any[], timestamp: number }>()
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
-
-async function getCachedUserWorkspaces(userId: string) {
-  const cacheKey = `workspaces_${userId}`
-  const cached = WORKSPACE_CACHE.get(cacheKey)
-
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    console.log('💾 Using cached workspace validation for user:', userId.substring(-8), `(age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`)
-    return cached.workspaces
-  }
-
-  // Clean up expired cache entries periodically
-  if (WORKSPACE_CACHE.size > 100) { // Prevent memory leaks
-    console.log('🧹 Cleaning up expired workspace cache entries')
-    const now = Date.now()
-    for (const [key, value] of WORKSPACE_CACHE.entries()) {
-      if (now - value.timestamp > CACHE_DURATION) {
-        WORKSPACE_CACHE.delete(key)
-      }
-    }
-  }
-
-  console.log('🔍 Workspace validation cache miss - querying database for user:', userId.substring(-8))
-  const { getUserWorkspaces } = await import('@/lib/workspace-helpers')
-  const workspaces = await getUserWorkspaces(userId)
-
-  WORKSPACE_CACHE.set(cacheKey, { workspaces, timestamp: Date.now() })
-  console.log('💾 Cached workspace validation result:', workspaces.length, 'workspaces for user:', userId.substring(-8))
-
-  return workspaces
-}
+// Location data is global - no workspace validation needed
 
 export async function GET(request: NextRequest) {
   return handleRequest(request, 'GET');
@@ -2668,19 +2636,14 @@ async function handleRequest(request: NextRequest, method: 'GET' | 'POST') {
     try {
       const { userId } = await auth()
       if (userId) {
-        // Check if user has workspace access (with caching to avoid repeated DB queries)
-        const userWorkspaces = await getCachedUserWorkspaces(userId)
-        if (userWorkspaces.length === 0) {
-          console.log(`❌ User ${userId.substring(-8)} has no workspace access, blocking GHL data access`)
-          return NextResponse.json({ error: 'No workspace access' }, { status: 403 })
-        }
-        const workspace = userWorkspaces[0] // Use first workspace
+        // Locations are global - no workspace validation needed for location data
+        // All authenticated users can access all locations
         activityTracker.logActivity(
           userId,
           'ghl_sync',
           'GHL Data Synced',
           `Successfully synced data for ${locationId ? 'location' : 'all locations'}`,
-          workspace.id,
+          undefined, // No workspace ID for global location access
           { locationId, dataSummary: { contacts: data.contacts?.length || 0, opportunities: data.opportunities?.length || 0 } }
         )
       }

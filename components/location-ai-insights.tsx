@@ -45,7 +45,8 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
     healthScore: pageData?.healthScore
   })
 
-  const { currentWorkspace } = useWorkspace()
+  // Note: Removed useWorkspace hook to prevent unnecessary workspace validation
+  // Since locations are global, we don't need workspace context here
 
   // Legacy insights (kept for backward compatibility)
   const [insights, setInsights] = useState<AIInsight[]>([])
@@ -86,7 +87,7 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
               pageContext: 'location-compact',
               useStreaming: false,
               model: selectedModel === 'auto' ? null : selectedModel,
-              workspaceId: currentWorkspace?.id || null,
+              workspaceId: null, // Locations are global, no workspace context needed
               pageData: {
                 locationId,
                 locationName,
@@ -148,7 +149,7 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
     }
 
     throw new Error(`All ${maxRetries} AI service attempts failed`)
-  }, [locationId, locationName, pageData, analytics, selectedModel, currentWorkspace, makeAIRequest])
+  }, [locationId, locationName, pageData, analytics, selectedModel, makeAIRequest])
 
   // Handle sending chat messages
   const handleSendMessage = useCallback(async () => {
@@ -664,7 +665,7 @@ Format as JSON array with actionable business intelligence:
         endpoint: '/api/ai/coach',
         model: selectedModel,
         promptLength: prompt.length,
-        workspaceId: currentWorkspace?.id,
+        workspaceId: null, // Locations are global, no workspace context needed
         hasAnalyticsData: !!analytics,
         useCustomPrompt
       })
@@ -740,7 +741,7 @@ Format as JSON array with actionable business intelligence:
       setError(err instanceof Error ? err.message : 'AI service temporarily unavailable')
       setLastUpdated(null) // Don't show stale timestamp for fallback
     }
-  }, [locationId, locationName, pageData, analytics, selectedModel, currentWorkspace, customPrompt, isUsingCustomPrompt, generateEnhancedPrompt, parseAIResponse, callAIWithRetry, generateSmartFallback])
+  }, [locationId, locationName, pageData, analytics, selectedModel, customPrompt, isUsingCustomPrompt, generateEnhancedPrompt, parseAIResponse, callAIWithRetry, generateSmartFallback])
 
   // Load cached insights on component mount
   const loadCachedInsights = useCallback((): boolean => {
