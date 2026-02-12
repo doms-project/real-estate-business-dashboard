@@ -162,33 +162,54 @@ export async function getUserWorkspaces(userId: string): Promise<Workspace[]> {
     throw new Error('Supabase not configured')
   }
 
-  // Get all workspaces user is associated with, ordered by most recent membership
+  console.log('🔍 getUserWorkspaces called with userId:', userId)
+
+  // First, get workspace memberships (this should work with service role)
   const { data: memberships, error: memberError } = await supabaseAdmin
     .from('workspace_members')
-    .select(`
-      joined_at,
-      workspaces!inner (
-        id,
-        name,
-        owner_id,
-        created_at,
-        updated_at
-      )
-    `)
+    .select('workspace_id, joined_at')
     .eq('user_id', userId)
     .order('joined_at', { ascending: false })
 
+  console.log('📊 Memberships query result:')
+  console.log('  - Error:', memberError)
+  console.log('  - Memberships found:', memberships?.length || 0)
+
   if (memberError) {
     console.error('Error fetching memberships:', memberError)
+    return []
   }
 
-  // Extract unique workspaces, maintaining order by most recent membership
-  const workspaceMap = new Map<string, Workspace>()
-  memberships?.forEach((membership: any) => {
-    if (membership.workspaces && !workspaceMap.has(membership.workspaces.id)) {
-      workspaceMap.set(membership.workspaces.id, membership.workspaces as Workspace)
-    }
-  })
+  if (!memberships || memberships.length === 0) {
+    console.log('ℹ️ No memberships found for user')
+    // Check for owned workspaces as fallback
+    const { data: ownedWorkspaces, error: ownedError } = await supabaseAdmin
+      .from('workspaces')
+      .select('*')
+      .eq('owner_id', userId)
+
+    console.log('🏢 Owned workspaces fallback:', ownedWorkspaces?.length || 0)
+    return ownedWorkspaces || []
+  }
+
+  // Extract unique workspace IDs
+  const workspaceIds = [...new Set(memberships.map(m => m.workspace_id))]
+  console.log('🏢 Found workspace IDs:', workspaceIds)
+
+  // Second, get workspace details separately
+  const { data: workspaces, error: workspaceError } = await supabaseAdmin
+    .from('workspaces')
+    .select('id, name, owner_id, created_at, updated_at')
+    .in('id', workspaceIds)
+
+  console.log('🏢 Workspaces query result:')
+  console.log('  - Error:', workspaceError)
+  console.log('  - Workspaces found:', workspaces?.length || 0)
+
+  if (workspaceError) {
+    console.error('Error fetching workspaces:', workspaceError)
+    return []
+  }
 
   // Check for any owned workspaces not in memberships (legacy data)
   const { data: ownedWorkspaces, error: ownedError } = await supabaseAdmin
@@ -196,13 +217,14 @@ export async function getUserWorkspaces(userId: string): Promise<Workspace[]> {
     .select('*')
     .eq('owner_id', userId)
 
-  ownedWorkspaces?.forEach(workspace => {
-    if (!workspaceMap.has(workspace.id)) {
-      workspaceMap.set(workspace.id, workspace as Workspace)
-    }
-  })
+  // Combine and deduplicate
+  const allWorkspaces = [...(workspaces || []), ...(ownedWorkspaces || [])]
+  const uniqueWorkspaces = allWorkspaces.filter((workspace, index, self) =>
+    index === self.findIndex(w => w.id === workspace.id)
+  )
 
-  return Array.from(workspaceMap.values())
+  console.log('✅ Returning workspaces:', uniqueWorkspaces.length, uniqueWorkspaces.map(w => w.name))
+  return uniqueWorkspaces
 }
 
 /**

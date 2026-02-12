@@ -9,8 +9,10 @@ export async function GET(request: NextRequest) {
     console.log('📊 Analytics script: Request received', {
       url: request.url,
       method: request.method,
-      headers: Object.fromEntries(request.headers.entries()),
-      searchParams: Object.fromEntries(request.nextUrl.searchParams.entries())
+      userAgent: request.headers.get('user-agent'),
+      hasAuthCookie: request.headers.get('cookie')?.includes('__session') || false,
+      searchParams: Object.fromEntries(request.nextUrl.searchParams.entries()),
+      timestamp: new Date().toISOString()
     });
 
     // Serve the analytics script

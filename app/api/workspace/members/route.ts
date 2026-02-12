@@ -278,10 +278,40 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
+    // Check if user has any other workspace memberships
+    const { data: remainingMemberships } = await supabaseAdmin
+      .from('workspace_members')
+      .select('id')
+      .eq('user_id', memberUserId)
+      .limit(1)
+
+    console.log('DELETE /api/workspace/members - User has remaining memberships:', remainingMemberships?.length || 0)
+
+    // If user has no other workspace memberships, check if they own any workspaces
+    if (!remainingMemberships || remainingMemberships.length === 0) {
+      const { data: ownedWorkspaces } = await supabaseAdmin
+        .from('workspaces')
+        .select('id')
+        .eq('owner_id', memberUserId)
+        .limit(1)
+
+      console.log('DELETE /api/workspace/members - User owns workspaces:', ownedWorkspaces?.length || 0)
+
+      // If user owns no workspaces and has no memberships, they're completely isolated
+      if (!ownedWorkspaces || ownedWorkspaces.length === 0) {
+        console.log('DELETE /api/workspace/members - User is now completely isolated from all workspaces')
+
+        // OPTIONAL: You could add cleanup logic here for user data
+        // For now, we just log this situation - the user will lose access to all workspace data due to RLS policies
+        // Their Clerk account and basic profile remain intact
+      }
+    }
+
     console.log('DELETE /api/workspace/members - Member removed successfully')
     return NextResponse.json({
       success: true,
-      message: 'Member removed successfully'
+      message: 'Member removed successfully',
+      userIsolated: (!remainingMemberships || remainingMemberships.length === 0)
     })
   } catch (error: any) {
     console.error('Error in DELETE /api/workspace/members:', error)

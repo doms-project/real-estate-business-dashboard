@@ -21,8 +21,6 @@ const publicRoutes = bypassAuth ? [
   '/api/ghl/data', // Allow authenticated users to access GHL data
   '/api/ghl/locations', // Allow access to GHL locations
   '/api/ghl/metrics(.*)', // Allow access to metrics APIs
-  '/api/analytics/script', // Allow public access to analytics script for external websites
-  '/api/analytics', // Allow public access to analytics API for tracking data
   '/api/ai/business-insights', // Allow access to AI business insights
 ];
 
@@ -39,6 +37,8 @@ export default authMiddleware({
   ignoredRoutes: [
     '/api/health',
     '/api/public(.*)',
+    '/api/analytics/script', // Analytics script for external websites
+    '/api/analytics', // Analytics API for tracking data
   ],
 });
 

@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Brain, TrendingUp, Target, AlertTriangle, Lightbulb, Loader2, RefreshCw } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Brain, TrendingUp, Target, AlertTriangle, Lightbulb, Loader2, RefreshCw, Send, MessageCircle, User } from "lucide-react"
 import { useAICoordinator } from "@/hooks/use-ai-coordinator"
 import { useWorkspace } from "@/components/workspace-context"
 
@@ -24,12 +25,38 @@ interface AIInsight {
   metrics?: string[]
 }
 
+interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  timestamp: Date
+  isTyping?: boolean
+}
+
 export function LocationAIInsights({ locationId, locationName, analytics, pageData }: LocationAIInsightsProps) {
   console.log('🎯 LocationAIInsights component rendered for:', locationName, locationId)
+  console.log('📊 Component props:', {
+    locationId,
+    locationName,
+    hasAnalytics: !!analytics,
+    hasPageData: !!pageData,
+    contacts: pageData?.contacts,
+    opportunities: pageData?.opportunities,
+    healthScore: pageData?.healthScore
+  })
 
   const { currentWorkspace } = useWorkspace()
 
+  // Legacy insights (kept for backward compatibility)
   const [insights, setInsights] = useState<AIInsight[]>([])
+
+  // Chat interface state
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [currentMessage, setCurrentMessage] = useState('')
+  const [isTyping, setIsTyping] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // UI state
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showPromptEditor, setShowPromptEditor] = useState(false)
@@ -41,17 +68,284 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
   const { makeAIRequest, isLoading } = useAICoordinator(`LocationAIInsights-${locationId}`)
   console.log('🤖 AI Coordinator initialized:', { isLoading, hasMakeAIRequest: !!makeAIRequest })
 
-  // Generate the default prompt based on location data
-  const generateDefaultPrompt = useCallback(() => {
-    console.log('📊 generateDefaultPrompt called with pageData:', {
-      contacts: pageData.contacts,
-      opportunities: pageData.opportunities,
-      conversations: pageData.conversations,
-      healthScore: pageData.healthScore,
-      leadSources: pageData.leadSources
-    })
+  // Enhanced AI service with retry logic
+  const callAIWithRetry = useCallback(async (prompt: string, maxRetries = 2): Promise<Response> => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🤖 AI attempt ${attempt}/${maxRetries}`)
 
-    const keyMetrics = {
+        const response = await makeAIRequest(() => {
+          console.log('🌐 Executing fetch to /api/ai/coach')
+          return fetch('/api/ai/coach', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              message: prompt,
+              pageContext: 'location-compact',
+              useStreaming: false,
+              model: selectedModel === 'auto' ? null : selectedModel,
+              workspaceId: currentWorkspace?.id || null,
+              pageData: {
+                locationId,
+                locationName,
+                analytics,
+                contacts: pageData.contacts,
+                opportunities: pageData.opportunities,
+                conversations: pageData.conversations,
+                healthScore: pageData.healthScore,
+                leadSources: pageData.leadSources,
+                // Include rich analytics data
+                pipelineAnalysis: analytics?.pipelineAnalysis,
+                revenueMetrics: analytics?.revenueMetrics,
+                conversationMetrics: analytics?.conversationMetrics,
+                workflows: analytics?.workflows,
+                formsData: analytics?.formsData,
+                socialAnalytics: analytics?.socialAnalytics
+              }
+            })
+          })
+        })
+
+        if (response.ok) {
+          console.log(`✅ AI attempt ${attempt} successful`)
+          return response
+        }
+
+        const errorText = await response.text()
+        console.warn(`⚠️ AI attempt ${attempt} failed:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText.substring(0, 200)
+        })
+
+        // Don't retry on client errors (4xx)
+        if (response.status >= 400 && response.status < 500) {
+          console.log('🚫 Client error - not retrying')
+          return response
+        }
+
+        // Retry on server errors (5xx) or network issues
+        if (attempt < maxRetries) {
+          const backoffDelay = 1000 * attempt // Exponential backoff
+          console.log(`⏳ Retrying in ${backoffDelay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, backoffDelay))
+        }
+
+      } catch (error) {
+        console.error(`❌ AI attempt ${attempt} error:`, error)
+
+        if (attempt === maxRetries) {
+          throw error
+        }
+
+        // Wait before retry
+        const backoffDelay = 1000 * attempt
+        console.log(`⏳ Retrying after error in ${backoffDelay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, backoffDelay))
+      }
+    }
+
+    throw new Error(`All ${maxRetries} AI service attempts failed`)
+  }, [locationId, locationName, pageData, analytics, selectedModel, currentWorkspace, makeAIRequest])
+
+  // Handle sending chat messages
+  const handleSendMessage = useCallback(async () => {
+    if (!currentMessage.trim()) return
+
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: currentMessage.trim(),
+      timestamp: new Date()
+    }
+
+    // Add user message
+    setMessages(prev => [...prev, userMessage])
+    setCurrentMessage('')
+    setIsTyping(true)
+    setError(null)
+
+    try {
+      console.log('💬 Processing chat message:', userMessage.content)
+
+      // Generate AI response for the location-specific question
+      const aiResponse = await generateChatResponse(userMessage.content)
+
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: aiResponse,
+        timestamp: new Date()
+      }
+
+      setMessages(prev => [...prev, assistantMessage])
+      setLastUpdated(new Date())
+
+    } catch (err) {
+      console.error('❌ Chat response error:', err)
+      const errorMessage: ChatMessage = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: `Sorry, I encountered an error: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`,
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
+      setError(err instanceof Error ? err.message : 'Chat response failed')
+    } finally {
+      setIsTyping(false)
+    }
+  }, [currentMessage])
+
+  // Generate conversational AI response for location questions
+  const generateChatResponse = useCallback(async (question: string): Promise<string> => {
+    console.log('🤖 Generating chat response for question:', question)
+
+    const conversationContext = messages.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n')
+
+    const chatPrompt = `
+You are an expert location business analyst for ${locationName}. Answer questions conversationally using ONLY the location's current data.
+
+LOCATION DATA (${locationName}):
+- Contacts: ${pageData.contacts || 0}
+- Opportunities: ${pageData.opportunities || 0}
+- Conversations: ${pageData.conversations || 0}
+- Health Score: ${pageData.healthScore || 0}%
+- Conversion Rate: ${pageData.contacts && pageData.opportunities ? ((pageData.opportunities / pageData.contacts) * 100).toFixed(1) : 0}%
+- Top Lead Source: ${pageData.leadSources?.sources?.[0]?.source || 'None'} (${pageData.leadSources?.sources?.[0]?.percentage || 0}%)
+
+BUSINESS METRICS:
+- Revenue: $${analytics?.revenueMetrics?.totalRevenue || 0}
+- Win Rate: ${analytics?.pipelineAnalysis?.winRate || 0}%
+- Avg Response Time: ${analytics?.conversationMetrics?.avgResponseTime || 0} minutes
+- Active Workflows: ${analytics?.workflows?.length || 0}
+- Marketing Forms: ${analytics?.formsData?.totalForms || 0}
+
+RECENT CONVERSATION:
+${conversationContext}
+
+USER QUESTION: ${question}
+
+INSTRUCTIONS:
+- Answer as a conversational business advisor
+- Use specific numbers from the location data above
+- Focus ONLY on this location's performance - no external comparisons
+- Provide actionable insights based on the actual metrics
+- Keep responses helpful and focused on ${locationName}
+- If data is missing, acknowledge it and work with available information
+
+RESPONSE:`
+
+    console.log('📝 Chat prompt prepared, calling AI service')
+
+    const response = await callAIWithRetry(chatPrompt, 2)
+    const data = await response.json()
+    const aiResponse = data.reply || data.response || ''
+
+    if (!aiResponse.trim()) {
+      throw new Error('AI returned empty response')
+    }
+
+    console.log('✅ Chat response generated:', aiResponse.substring(0, 100) + '...')
+    return aiResponse
+  }, [locationName, pageData, analytics, messages, callAIWithRetry])
+
+  // Handle keyboard shortcuts
+  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendMessage()
+    }
+  }, [handleSendMessage])
+
+  // Generate smart fallback insights based on actual data analysis
+  const generateSmartFallback = useCallback((): AIInsight[] => {
+    const insights: AIInsight[] = []
+    console.log('🎯 Generating smart fallback insights for:', locationName)
+
+    // Lead source concentration analysis
+    if (pageData.leadSources?.sources?.[0]?.percentage > 80) {
+      insights.push({
+        type: 'warning',
+        title: 'Lead Source Concentration Risk',
+        description: `${pageData.leadSources.sources[0].percentage}% of leads from single source '${pageData.leadSources.sources[0].source}' creates vulnerability. Diversify lead channels immediately.`,
+        priority: 'high',
+        metrics: ['lead_sources', 'diversification', 'risk_management']
+      })
+    }
+
+    // Conversion rate analysis
+    const contacts = pageData.contacts || 0
+    const opportunities = pageData.opportunities || 0
+    if (contacts > 0) {
+      const conversionRate = (opportunities / contacts) * 100
+      if (conversionRate < 3) {
+        insights.push({
+          type: 'opportunity',
+          title: 'Low Conversion Optimization',
+          description: `Only ${conversionRate.toFixed(1)}% contact-to-opportunity conversion (${opportunities}/${contacts}). Implement lead scoring and qualification process.`,
+          priority: 'high',
+          metrics: ['conversion_rate', 'lead_qualification', 'sales_process']
+        })
+      }
+    }
+
+    // Health score insights
+    const healthScore = pageData.healthScore || 0
+    if (healthScore < 50) {
+      insights.push({
+        type: 'performance',
+        title: 'Health Score Improvement Required',
+        description: `${healthScore}% health score indicates operational issues. Focus on response times (${analytics?.conversationMetrics?.avgResponseTime || 'unknown'}min) and engagement metrics.`,
+        priority: 'high',
+        metrics: ['health_score', 'response_time', 'engagement']
+      })
+    }
+
+    // Opportunity pipeline analysis
+    if (analytics?.pipelineAnalysis) {
+      const pipeline = analytics.pipelineAnalysis
+      if (pipeline.totalOpportunities > 0 && pipeline.winRate !== undefined) {
+        if (pipeline.winRate < 20) {
+          insights.push({
+            type: 'warning',
+            title: 'Pipeline Conversion Issues',
+            description: `${pipeline.winRate}% win rate on ${pipeline.totalOpportunities} opportunities is below target. Review sales process and pricing strategy.`,
+            priority: 'medium',
+            metrics: ['win_rate', 'pipeline', 'sales_performance']
+          })
+        }
+      }
+    }
+
+    // Workflow automation analysis
+    const workflowCount = analytics?.workflows?.length || 0
+    if (workflowCount === 0 && contacts > 100) {
+      insights.push({
+        type: 'recommendation',
+        title: 'Automation Opportunity',
+        description: `No automated workflows with ${contacts} contacts. Implement lead nurturing sequences and follow-up automation.`,
+        priority: 'medium',
+        metrics: ['automation', 'workflows', 'efficiency']
+      })
+    }
+
+    // Return smart insights or basic fallback
+    return insights.length > 0 ? insights.slice(0, 3) : [{
+      type: 'performance' as const,
+      title: 'Current Performance Overview',
+      description: `${locationName}: ${contacts} contacts, ${opportunities} opportunities, ${healthScore}% health score. AI analysis temporarily unavailable.`,
+      priority: 'medium' as const,
+      metrics: ['contacts', 'opportunities', 'health_score']
+    }]
+  }, [locationName, pageData, analytics])
+
+  // Generate enhanced prompt with rich business context
+  const generateEnhancedPrompt = useCallback(() => {
+    console.log('📊 Generating enhanced AI prompt with rich context')
+
+    const metrics = {
       contacts: pageData.contacts || 0,
       opportunities: pageData.opportunities || 0,
       conversations: pageData.conversations || 0,
@@ -60,25 +354,75 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
       topSourcePct: pageData.leadSources?.sources?.[0]?.percentage || 0
     }
 
-    // Special handling for locations with zero activity
-    if (keyMetrics.contacts === 0 && keyMetrics.opportunities === 0 && keyMetrics.conversations === 0) {
-      return `Location ${locationName} has ZERO client activity: 0 contacts, 0 opportunities, 0 conversations, ${keyMetrics.healthScore}% health score.
+    // Calculate derived metrics
+    const conversionRate = metrics.contacts > 0 ? (metrics.opportunities / metrics.contacts * 100) : 0
 
-This location is completely dormant and needs immediate activation. Provide 3 specific, actionable recommendations:
+    // Build comprehensive business context
+    const businessContext = []
 
-1. LEAD CAPTURE: Deploy a location-specific landing page with contact form and automated lead nurturing sequence
-2. LOCAL MARKETING: Launch targeted advertising campaign (Google Local Service Ads, Facebook local ads) with location-specific messaging
-3. NETWORKING STRATEGY: Reach out to 20-30 local businesses/partners in the ${locationName} area for referral partnerships
+    // Core performance
+    businessContext.push(`CORE METRICS:
+- Contacts: ${metrics.contacts}
+- Opportunities: ${metrics.opportunities}
+- Conversations: ${metrics.conversations}
+- Health Score: ${metrics.healthScore}%
+- Conversion Rate: ${conversionRate.toFixed(1)}%
+- Top Lead Source: ${metrics.topSource} (${metrics.topSourcePct}% of leads)`)
 
-Format as JSON array with practical, implementable actions:
-[{"type":"opportunity","title":"Quick Win Action","description":"Immediate 1-week action that can generate first leads","priority":"high","metrics":["timeline","cost","expected_results"]},{"type":"recommendation","title":"Marketing Campaign","description":"30-day marketing strategy for location activation","priority":"high","metrics":["channels","budget","goals"]},{"type":"warning","title":"Partnership Development","description":"Long-term strategy for local business relationships","priority":"medium","metrics":["targets","approach","timeline"]}]`
+    // Revenue context
+    if (analytics?.revenueMetrics) {
+      const rev = analytics.revenueMetrics
+      businessContext.push(`REVENUE PERFORMANCE:
+- Total Revenue: $${rev.totalRevenue || 0}
+- Win Rate: ${rev.winRate || 0}%
+- Average Deal Size: $${rev.avgDealSize || 0}`)
     }
 
-    return `Analyze ${locationName}: ${keyMetrics.contacts} contacts, ${keyMetrics.opportunities} opps, ${keyMetrics.healthScore}% health, top source: ${keyMetrics.topSource} (${keyMetrics.topSourcePct}%).
+    // Operational context
+    if (analytics?.conversationMetrics) {
+      const conv = analytics.conversationMetrics
+      businessContext.push(`COMMUNICATION METRICS:
+- Response Time: ${conv.avgResponseTime || 0} minutes
+- Response Rate: ${conv.responseRate || 0}%
+- Active Conversations: ${conv.activeConversations || 0}`)
+    }
 
-Return 2-3 insights as JSON array:
-[{"type":"performance/opportunity/warning/recommendation","title":"Brief title","description":"1 sentence with numbers","priority":"high/medium/low","metrics":["key","metrics"]}]`
-  }, [locationName, pageData.contacts, pageData.opportunities, pageData.conversations, pageData.healthScore, pageData.leadSources])
+    // Automation context
+    const workflowCount = analytics?.workflows?.length || 0
+    const formCount = analytics?.formsData?.totalForms || 0
+    businessContext.push(`AUTOMATION & TOOLS:
+- Active Workflows: ${workflowCount}
+- Marketing Forms: ${formCount}
+- Social Media Accounts: ${analytics?.socialAnalytics?.summary?.totalAccounts || 0}`)
+
+    // Special case for zero activity
+    if (metrics.contacts === 0 && metrics.opportunities === 0 && metrics.conversations === 0) {
+      return `Location ${locationName} has ZERO client activity: 0 contacts, 0 opportunities, 0 conversations, ${metrics.healthScore}% health score.
+
+This location is completely dormant and needs immediate activation. Provide 3 specific, actionable recommendations for a ${locationName} location:
+
+1. LOCAL LEAD GENERATION: Deploy location-specific landing pages and contact forms
+2. TARGETED MARKETING: Launch geo-targeted campaigns (Google Local, Facebook Local)
+3. COMMUNITY NETWORKING: Build partnerships with local businesses for referrals
+
+Format as JSON array with practical, implementable actions for location activation.`
+    }
+
+    // Standard analysis prompt
+    return `ANALYZE ${locationName} BUSINESS PERFORMANCE:
+
+${businessContext.join('\n\n')}
+
+PROVIDE 2-3 SPECIFIC INSIGHTS about performance, opportunities, warnings, or recommendations. Focus on:
+- Lead generation effectiveness and diversification
+- Conversion rate optimization opportunities
+- Operational efficiency improvements
+- Revenue growth strategies
+- Risk mitigation
+
+Format as JSON array with actionable business intelligence:
+[{"type":"performance/opportunity/warning/recommendation","title":"Brief title","description":"1 sentence with specific numbers and actionable advice","priority":"high/medium/low","metrics":["key","metrics"]}]`
+  }, [locationName, pageData, analytics])
 
   const parseAIResponse = useCallback((response: string): AIInsight[] => {
     // Ultra-efficient parsing for free model limits
@@ -145,33 +489,118 @@ Return 2-3 insights as JSON array:
   }, [locationName, pageData.contacts, pageData.opportunities, pageData.conversations, pageData.healthScore])
 
   const generateInsights = useCallback(async (useCustomPrompt = false) => {
-    console.log('🔍 LocationAIInsights: generateInsights called with useCustomPrompt:', useCustomPrompt)
+    console.log('🚀 GENERATE INSIGHTS FUNCTION CALLED')
+    console.log('🔍 AI Debug - Starting insight generation')
+    console.log('📊 Input context:', {
+      locationId,
+      locationName,
+      contacts: pageData.contacts,
+      opportunities: pageData.opportunities,
+      conversations: pageData.conversations,
+      healthScore: pageData.healthScore,
+      hasLeadSources: !!pageData.leadSources,
+      useCustomPrompt,
+      selectedModel
+    })
+
+    // Clear existing insights to show we're working
+    setInsights([])
     setError(null)
+    console.log('🧹 Cleared existing insights')
 
     try {
-      console.log('🎯 Entered try block - about to check rate limiting')
+      console.log('🎯 Entered try block - checking prerequisites')
+      console.log('🔧 Prerequisites check:', {
+        hasLocationId: !!locationId,
+        hasContacts: pageData.contacts > 0,
+        hasOpportunities: pageData.opportunities >= 0,
+        makeAIRequestAvailable: !!makeAIRequest
+      })
+
+      // Check if we have basic data
+      if (!pageData.contacts && !pageData.opportunities) {
+        console.warn('⚠️ No contact/opportunity data available')
+        setInsights(generateSmartFallback())
+        return
+      }
 
       // Rate limiting for free model - don't call AI more than once per 10 minutes per location
       const rateLimitKey = `ai_rate_limit_${locationId}`
-      console.log('🔑 Checking localStorage for rate limit key:', rateLimitKey)
+      console.log('🔑 Checking rate limit for key:', rateLimitKey)
 
       let lastCall
       try {
         lastCall = localStorage.getItem(rateLimitKey)
-        console.log('💾 localStorage access successful, lastCall:', lastCall)
+        console.log('💾 Rate limit timestamp:', lastCall)
       } catch (storageError) {
         console.error('❌ localStorage error:', storageError)
         lastCall = null
       }
+
       if (lastCall) {
         const timeSinceLastCall = Date.now() - parseInt(lastCall)
-        console.log('⏱️ Rate limit check:', { timeSinceLastCall, limit: 10 * 60 * 1000, isLimited: timeSinceLastCall < (10 * 60 * 1000) })
-        if (timeSinceLastCall < (10 * 60 * 1000)) { // 10 minutes
-          console.log('🚫 Rate limited - using cache or fallback')
-          // Use cache or fallback without AI call
+        const rateLimitWindow = 10 * 60 * 1000 // 10 minutes
+        const isRateLimited = timeSinceLastCall < rateLimitWindow
+
+        console.log('⏱️ Rate limit check:', {
+          timeSinceLastCall: Math.round(timeSinceLastCall / 1000),
+          limitSeconds: rateLimitWindow / 1000,
+          isLimited: isRateLimited,
+          lastCallTimestamp: new Date(parseInt(lastCall)).toISOString()
+        })
+
+        if (isRateLimited) {
+          console.log('🚫 RATE LIMITED - will use cache or fallback')
+          // Check cache directly
+          const cacheKey = `ai_insights_${locationId}`
+          const cached = localStorage.getItem(cacheKey)
+          const cacheTimestamp = localStorage.getItem(`${cacheKey}_timestamp`)
+
+          console.log('💾 Cache check:', { hasCache: !!cached, hasTimestamp: !!cacheTimestamp })
+
+          if (cached && cacheTimestamp) {
+            const cacheAge = Date.now() - parseInt(cacheTimestamp)
+            const maxAge = 2 * 60 * 60 * 1000 // 2 hours
+            const isCacheFresh = cacheAge < maxAge
+
+            console.log('📅 Cache age check:', {
+              cacheAgeMinutes: Math.round(cacheAge / (1000 * 60)),
+              maxAgeHours: maxAge / (1000 * 60 * 60),
+              isFresh: isCacheFresh
+            })
+
+            if (isCacheFresh) {
+              console.log('📋 USING CACHED INSIGHTS - rate limited')
+              try {
+                const parsedInsights = JSON.parse(cached)
+                if (Array.isArray(parsedInsights) && parsedInsights.length > 0) {
+                  setInsights(parsedInsights)
+                  setLastUpdated(new Date(parseInt(cacheTimestamp)))
+                  console.log('✅ Successfully loaded cached insights (rate limited):', parsedInsights.length, 'insights')
+                  console.log('📊 Cached insights preview:', parsedInsights.slice(0, 2))
+                  return
+                } else {
+                  console.log('⚠️ Cached insights array is empty or invalid')
+                }
+              } catch (error) {
+                console.error('❌ Error parsing cached insights:', error)
+              }
+            } else {
+              console.log('⏰ Cache expired, will use fallback')
+            }
+          } else {
+            console.log('📭 No cache available')
+          }
+
+          // No valid cache, use smart fallback
+          console.log('🎯 USING SMART FALLBACK - no valid cache available')
+          const fallbackInsights = generateSmartFallback()
+          setInsights(fallbackInsights)
+          console.log('📊 Generated fallback insights:', fallbackInsights.length)
+          return
         }
       } else {
-        console.log('✅ No previous calls - not rate limited')
+        console.log('✅ No previous calls - not rate limited, proceeding with AI generation')
       }
 
       // Check cache first - reuse the same logic as loadCachedInsights
@@ -212,61 +641,78 @@ Return 2-3 insights as JSON array:
         console.log('📭 No cache found - will make API call')
       }
 
-      // Use custom prompt if provided, otherwise generate default
+      // PASSED RATE LIMITING - proceeding with AI generation
+      console.log('✅ PASSED all checks - proceeding with AI insight generation')
+
+      // Generate comprehensive prompt with rich context
       const prompt = useCustomPrompt && customPrompt.trim()
         ? customPrompt.trim()
-        : generateDefaultPrompt()
+        : generateEnhancedPrompt()
 
-      console.log('📝 Generated prompt:', prompt ? prompt.substring(0, 100) + '...' : 'EMPTY PROMPT')
-      console.log('🚀 LocationAIInsights: About to make API request to /api/ai/coach')
-      console.log('📝 Prompt length:', prompt.length, 'Model:', selectedModel)
-      console.log('🔑 Making actual API call now...')
+      console.log('📝 Generated prompt:', prompt ? `Length: ${prompt.length}, Preview: "${prompt.substring(0, 150)}..."` : 'EMPTY PROMPT')
 
       if (!prompt || prompt.length === 0) {
         throw new Error('No prompt generated - cannot make AI request')
       }
 
-      console.log('🔧 Calling makeAIRequest function...')
-      const response = await makeAIRequest(() => {
-        console.log('🌐 Executing fetch to /api/ai/coach')
-        return fetch('/api/ai/coach', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: prompt,
-            pageContext: 'location-compact',
-            useStreaming: false,
-            model: selectedModel === 'auto' ? null : selectedModel,
-            workspaceId: currentWorkspace?.id || null,
-            pageData: {
-              locationId,
-              locationName,
-              analytics,
-              contacts: pageData.contacts,
-              opportunities: pageData.opportunities,
-              conversations: pageData.conversations,
-              healthScore: pageData.healthScore,
-              leadSources: pageData.leadSources
-            }
-          })
-        })
-      })
-
-      console.log('📡 Received response from AI API')
-
-      if (!response.ok) {
-        console.error('❌ AI API response not ok:', response.status, response.statusText)
-        throw new Error('Failed to generate AI insights')
+      // Validate prompt has minimum content
+      if (prompt.length < 50) {
+        throw new Error(`Prompt too short (${prompt.length} chars) - insufficient context for AI`)
       }
 
-      console.log('✅ AI API response OK, parsing JSON...')
-      const data = await response.json()
-      console.log('📄 Parsed AI response data')
+      console.log('🚀 Making AI API request with config:', {
+        endpoint: '/api/ai/coach',
+        model: selectedModel,
+        promptLength: prompt.length,
+        workspaceId: currentWorkspace?.id,
+        hasAnalyticsData: !!analytics,
+        useCustomPrompt
+      })
 
-      const aiInsights = parseAIResponse(data.reply || data.response || '')
-      console.log('🧠 Parsed AI insights:', aiInsights.length, 'insights')
+      const response = await callAIWithRetry(prompt)
+
+      console.log('📡 AI API call completed, processing response')
+
+      // Read response body ONCE to avoid double-read error
+      const responseText = await response.text()
+      console.log('📄 Raw response received, length:', responseText.length)
+
+      let data
+      try {
+        data = JSON.parse(responseText)
+        console.log('✅ Successfully parsed JSON response')
+      } catch (parseError) {
+        console.error('❌ JSON parse error:', parseError)
+        console.error('❌ Raw response text (first 500 chars):', responseText.substring(0, 500))
+        throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Parse failed'}`)
+      }
+
+      console.log('📊 Response data structure:', {
+        hasReply: !!data.reply,
+        hasResponse: !!data.response,
+        hasError: !!data.error,
+        keys: Object.keys(data)
+      })
+
+      const aiResponse = data.reply || data.response || ''
+      console.log('🤖 AI response text:', aiResponse ? `Length: ${aiResponse.length}, Preview: "${aiResponse.substring(0, 200)}..."` : 'EMPTY')
+
+      if (!aiResponse || aiResponse.trim().length === 0) {
+        console.warn('⚠️ AI returned empty response')
+        throw new Error('AI service returned empty response')
+      }
+
+      const aiInsights = parseAIResponse(aiResponse)
+      console.log('🧠 Successfully parsed AI insights:', {
+        count: aiInsights.length,
+        types: aiInsights.map(i => i.type),
+        titles: aiInsights.map(i => i.title)
+      })
+
+      if (aiInsights.length === 0) {
+        console.warn('⚠️ AI response parsed but no valid insights generated')
+        throw new Error('AI response parsing resulted in no insights')
+      }
 
       localStorage.setItem(cacheKey, JSON.stringify(aiInsights))
       localStorage.setItem(`${cacheKey}_timestamp`, Date.now().toString())
@@ -278,32 +724,83 @@ Return 2-3 insights as JSON array:
       console.log('✅ Successfully updated UI with AI insights')
 
     } catch (err) {
-      console.error('Error generating AI insights:', err)
-      setError(err instanceof Error ? err.message : 'Failed to generate insights')
-      // Simplified fallback for now
-      setInsights([])
+      console.error('💥 AI Generation failed:', err)
+      console.error('💥 Error details:', {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : 'No stack trace',
+        type: err?.constructor?.name || 'Unknown',
+        timestamp: new Date().toISOString()
+      })
+
+      // Generate smart fallback insights instead of empty array
+      const fallbackInsights = generateSmartFallback()
+      console.log('🎯 Using smart fallback insights:', fallbackInsights.length, 'insights')
+
+      setInsights(fallbackInsights)
+      setError(err instanceof Error ? err.message : 'AI service temporarily unavailable')
+      setLastUpdated(null) // Don't show stale timestamp for fallback
     }
-  }, [locationId, customPrompt, generateDefaultPrompt, parseAIResponse, pageData.contacts, pageData.opportunities, pageData.healthScore, pageData.leadSources.sources, locationName, makeAIRequest])
+  }, [locationId, locationName, pageData, analytics, selectedModel, currentWorkspace, customPrompt, isUsingCustomPrompt, generateEnhancedPrompt, parseAIResponse, callAIWithRetry, generateSmartFallback])
 
   // Load cached insights on component mount
-  const loadCachedInsights = useCallback(() => {
+  const loadCachedInsights = useCallback((): boolean => {
     try {
       const cacheKey = `ai_insights_${locationId}`
       const cached = localStorage.getItem(cacheKey)
-      if (cached) {
-        const parsedCache = JSON.parse(cached)
-        if (parsedCache.timestamp && Date.now() - parsedCache.timestamp < 24 * 60 * 60 * 1000) { // 24 hours
-          setInsights(parsedCache.insights)
+      const cacheTimestamp = localStorage.getItem(`${cacheKey}_timestamp`)
+
+      if (cached && cacheTimestamp) {
+        const cacheAge = Date.now() - parseInt(cacheTimestamp)
+        const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+
+        if (cacheAge < maxAge) {
+          const parsedInsights = JSON.parse(cached)
+          if (Array.isArray(parsedInsights) && parsedInsights.length > 0) {
+            setInsights(parsedInsights)
+            setLastUpdated(new Date(parseInt(cacheTimestamp)))
+            console.log('✅ Loaded cached insights on mount:', parsedInsights.length, 'insights')
+            return true
+          }
         }
       }
     } catch (error) {
       console.error('Error loading cached insights:', error)
     }
+    return false
   }, [locationId])
 
+  // Initialize welcome message
+  useEffect(() => {
+    if (locationId && messages.length === 0) {
+      const welcomeMessage: ChatMessage = {
+        id: 'welcome',
+        role: 'assistant',
+        content: `Hello! I'm your AI location analyst for ${locationName}. I can help you understand your business performance with ${pageData.contacts || 0} contacts, ${pageData.opportunities || 0} opportunities, and ${pageData.healthScore || 0}% health score.
+
+Ask me questions like:
+• "How is our lead generation performing?"
+• "What are our biggest opportunities?"
+• "Why is the health score ${pageData.healthScore}%?"
+• "How can we improve conversion rates?"
+
+All my insights are based only on ${locationName}'s data.`,
+        timestamp: new Date()
+      }
+      setMessages([welcomeMessage])
+      console.log('💬 Welcome message initialized for:', locationName)
+    }
+  }, [locationId, locationName, messages.length, pageData.contacts, pageData.opportunities, pageData.healthScore])
+
+  // Auto-scroll to bottom of messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // Legacy cache loading (kept for backward compatibility)
   useEffect(() => {
     if (locationId && insights.length === 0) {
-      loadCachedInsights()
+      const cacheLoaded = loadCachedInsights()
+      console.log('💾 Legacy cache load result:', cacheLoaded)
     }
   }, [locationId, insights.length, loadCachedInsights])
 
@@ -355,7 +852,15 @@ Return 2-3 insights as JSON array:
     )
   }
 
+  console.log('🔄 LocationAIInsights render:', {
+    isLoading,
+    insightsCount: insights.length,
+    hasError: !!error,
+    lastUpdated: lastUpdated?.toISOString()
+  })
+
   if (isLoading) {
+    console.log('⏳ Showing loading state')
     return (
       <Card>
         <CardHeader>
@@ -411,17 +916,18 @@ Return 2-3 insights as JSON array:
     )
   }
 
+  console.log('📄 Rendering normal component state')
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5 text-purple-500" />
-              AI-Powered Location Insights
+              <MessageCircle className="h-5 w-5 text-purple-500" />
+              AI Location Assistant - {locationName}
             </CardTitle>
             <CardDescription>
-              Intelligent analysis of {locationName} performance and opportunities
+              Chat with AI about {locationName}'s performance: {pageData.contacts || 0} contacts, {pageData.opportunities || 0} opportunities, {pageData.healthScore || 0}% health score
               {(pageData.contacts || 0) === 0 && (pageData.opportunities || 0) === 0 && (pageData.conversations || 0) === 0 && (
                 <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-800">
                   ⚠️ Zero Activity - Action Required
@@ -466,16 +972,30 @@ Return 2-3 insights as JSON array:
             </Button>
             <Button
               onClick={() => {
-                console.log('🖱️ Generate AI Insights button clicked')
-                generateInsights(isUsingCustomPrompt)
+                console.log('🗑️ Clear chat button clicked')
+                // Reset conversation to welcome message
+                const welcomeMessage: ChatMessage = {
+                  id: 'welcome-' + Date.now(),
+                  role: 'assistant',
+                  content: `Hello! I'm your AI location analyst for ${locationName}. I can help you understand your business performance with ${pageData.contacts || 0} contacts, ${pageData.opportunities || 0} opportunities, and ${pageData.healthScore || 0}% health score.
+
+Ask me questions like:
+• "How is our lead generation performing?"
+• "What are our biggest opportunities?"
+• "Why is the health score ${pageData.healthScore}%?"
+• "How can we improve conversion rates?"
+
+All my insights are based only on ${locationName}'s data.`,
+                  timestamp: new Date()
+                }
+                setMessages([welcomeMessage])
+                setError(null)
               }}
-              variant="default"
+              variant="outline"
               size="sm"
-              disabled={isLoading}
-              className="bg-purple-600 hover:bg-purple-700"
             >
-              <Brain className={`h-4 w-4 mr-2 ${isLoading ? 'animate-pulse' : ''}`} />
-              {isLoading ? 'Generating AI Insights...' : lastUpdated ? 'Refresh AI Insights' : 'Generate AI Insights'}
+              <RefreshCw className="h-4 w-4 mr-2" />
+              New Conversation
             </Button>
           </div>
         </div>
@@ -494,10 +1014,10 @@ Return 2-3 insights as JSON array:
             </div>
 
             <textarea
-              value={customPrompt || generateDefaultPrompt()}
+              value={customPrompt || generateEnhancedPrompt()}
               onChange={(e) => {
                 setCustomPrompt(e.target.value)
-                setIsUsingCustomPrompt(e.target.value !== generateDefaultPrompt())
+                setIsUsingCustomPrompt(e.target.value !== generateEnhancedPrompt())
               }}
               placeholder="Enter your custom analysis prompt..."
               className="w-full h-32 p-3 text-sm border rounded-md resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
@@ -510,7 +1030,7 @@ Return 2-3 insights as JSON array:
               <span>• Include actionable recommendations</span>
             </div>
 
-            {customPrompt !== generateDefaultPrompt() && customPrompt.trim() && (
+            {customPrompt !== generateEnhancedPrompt() && customPrompt.trim() && (
               <div className="flex gap-2">
                 <Button
                   onClick={() => {
@@ -527,40 +1047,93 @@ Return 2-3 insights as JSON array:
           </div>
         </div>
       )}
-      <CardContent>
-        <div className="space-y-4">
-          {insights.map((insight, index) => (
-            <div
-              key={index}
-              className={`p-4 rounded-lg border ${getInsightColor(insight.type, insight.priority)}`}
-            >
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  {getInsightIcon(insight.type)}
-                  <h4 className="font-medium text-sm">{insight.title}</h4>
+      <CardContent className="p-0">
+        <div className="flex flex-col h-96">
+          {/* Chat Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[80%] rounded-lg p-3 ${
+                    message.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : message.role === 'assistant'
+                      ? 'bg-gray-100 text-gray-900 border'
+                      : 'bg-yellow-100 text-yellow-900 border border-yellow-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {message.role === 'user' ? (
+                      <User className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    ) : (
+                      <Brain className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    )}
+                    <div className="flex-1">
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      <p className="text-xs opacity-70 mt-1">
+                        {message.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                {getPriorityBadge(insight.priority)}
               </div>
-              <p className="text-sm text-muted-foreground mb-2">{insight.description}</p>
-              {insight.metrics && insight.metrics.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {insight.metrics.map((metric, idx) => (
-                    <Badge key={idx} variant="outline" className="text-xs">
-                      {metric}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+            ))}
 
-          {insights.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <Brain className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p>No AI insights available yet.</p>
-              <p className="text-sm">Try refreshing to generate new insights.</p>
+            {/* Typing Indicator */}
+            {isTyping && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 text-gray-900 border rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <Brain className="h-4 w-4" />
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Chat Input */}
+          <div className="border-t p-4">
+            <div className="flex gap-2">
+              <Textarea
+                value={currentMessage}
+                onChange={(e) => setCurrentMessage(e.target.value)}
+                onKeyDown={handleKeyPress}
+                placeholder={`Ask about ${locationName}'s performance...`}
+                className="flex-1 min-h-[60px] resize-none"
+                disabled={isTyping}
+              />
+              <Button
+                onClick={handleSendMessage}
+                disabled={!currentMessage.trim() || isTyping}
+                className="px-4"
+              >
+                {isTyping ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
             </div>
-          )}
+            <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+              <span>Press Enter to send, Shift+Enter for new line</span>
+              <div className="flex items-center gap-2">
+                <span>{locationName} • {pageData.contacts || 0} contacts</span>
+                <Badge variant="outline" className="text-xs">
+                  {pageData.healthScore || 0}% health
+                </Badge>
+              </div>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

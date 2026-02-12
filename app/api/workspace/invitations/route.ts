@@ -174,10 +174,38 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Store invitation data in Clerk if user already exists
+    // This helps the webhook validate existing users
+    try {
+      // Check if a Clerk user already exists with this email
+      const { clerkClient } = await import('@clerk/nextjs/server')
+      const existingUsers = await clerkClient.users.getUserList({
+        emailAddress: [email.toLowerCase()]
+      })
+
+      if (existingUsers.length > 0) {
+        const clerkUser = existingUsers[0]
+        // Update existing user with invitation data
+        await clerkClient.users.updateUser(clerkUser.id, {
+          publicMetadata: {
+            invitation_id: invitation.id,
+            workspace_id: invitation.workspace_id,
+            invitation_status: 'pending',
+            invited_email: invitation.email,
+            invited_role: invitation.role
+          }
+        })
+        console.log(`📝 Updated existing Clerk user ${clerkUser.id} with invitation data`)
+      }
+    } catch (clerkError) {
+      console.error('Error updating Clerk user metadata:', clerkError)
+      // Don't fail invitation creation if Clerk update fails
+    }
+
     // TODO: Send invitation email here
     // For now, return the invitation with token (in production, don't expose token)
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true,
       invitation: {
         ...invitation,
