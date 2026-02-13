@@ -3,6 +3,21 @@ import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getUserVisibleBusinesses } from '@/lib/workspace-helpers'
 
+interface Campaign {
+  id: string
+  name: string
+  status: string
+  budget?: number
+  spent?: number
+  impressions?: number
+  clicks?: number
+  conversions?: number
+  business_id?: string
+  user_id?: string
+  ghl_campaign_id?: string
+  platform?: string
+}
+
 export const dynamic = 'force-dynamic'
 
 /**
@@ -151,7 +166,7 @@ export async function GET(request: NextRequest) {
     // Debug: Log all campaigns data
     businesses?.forEach((business, idx) => {
       console.log(`🏢 Business ${idx + 1} (${business.name}): ${business.campaigns?.length || 0} campaigns`)
-      business.campaigns?.forEach((campaign, cIdx) => {
+      business.campaigns?.forEach((campaign: Campaign, cIdx: number) => {
         console.log(`  📊 C${cIdx + 1}: ${campaign.name} - Spent: $${campaign.spent}, Status: ${campaign.status}, Conversions: ${campaign.conversions}`)
       })
     })
@@ -160,7 +175,7 @@ export async function GET(request: NextRequest) {
     // Calculate campaign metrics
     businesses?.forEach(business => {
       console.log(`📈 Processing business: ${business.name} (${business.campaigns?.length || 0} campaigns)`)
-      business.campaigns?.forEach(campaign => {
+      business.campaigns?.forEach((campaign: Campaign) => {
         totalBudget += campaign.budget || 0
         totalSpent += campaign.spent || 0
         totalImpressions += campaign.impressions || 0
@@ -221,7 +236,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate revenue by campaign type for more accurate attribution
     businesses?.forEach(business => {
-      business.campaigns?.forEach(campaign => {
+      business.campaigns?.forEach((campaign: Campaign) => {
         if (campaign.status === 'active') {
           const conversions = campaign.conversions || 0
           const platform = (campaign.platform || 'default').toLowerCase()
@@ -238,9 +253,9 @@ export async function GET(request: NextRequest) {
     })
 
     // Count total active conversions for reporting
-    const activeConversions = businesses?.reduce((sum, business) => {
-      const activeCampaigns = business.campaigns?.filter(c => c.status === 'active') || []
-      return sum + activeCampaigns.reduce((campaignSum, campaign) => campaignSum + (campaign.conversions || 0), 0)
+    const activeConversions = businesses?.reduce((sum: number, business) => {
+      const activeCampaigns = business.campaigns?.filter((c: Campaign) => c.status === 'active') || []
+      return sum + activeCampaigns.reduce((campaignSum: number, campaign: Campaign) => campaignSum + (campaign.conversions || 0), 0)
     }, 0) || 0
 
     console.log('💰 Business revenue from campaigns:', businessRevenue.toLocaleString(), `(based on ${activeConversions} active conversions with platform-specific lead values)`)
