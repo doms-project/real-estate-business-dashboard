@@ -19,6 +19,8 @@ interface WorkspaceContextType {
   setCurrentWorkspace: (workspace: Workspace) => void
   refreshWorkspaces: () => Promise<void>
   workspaceSwitchCount: number // Increments on workspace switches to trigger re-renders
+  approvalInProgress: boolean
+  setApprovalInProgress: (inProgress: boolean) => void
 }
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined)
@@ -30,6 +32,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [hasWorkspaceAccess, setHasWorkspaceAccess] = useState(false)
   const [workspaceSwitchCount, setWorkspaceSwitchCount] = useState(0)
+  const [approvalInProgress, setApprovalInProgress] = useState(false)
 
   // Load workspaces and set current workspace
   const refreshWorkspaces = useCallback(async () => {
@@ -109,7 +112,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     hasWorkspaceAccess,
     setCurrentWorkspace: handleSetCurrentWorkspace,
     refreshWorkspaces,
-    workspaceSwitchCount
+    workspaceSwitchCount,
+    approvalInProgress,
+    setApprovalInProgress
   }
 
   return (

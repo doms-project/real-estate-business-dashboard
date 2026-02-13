@@ -15,7 +15,7 @@ import { Users, Mail, LogOut } from "lucide-react"
 import { InvitationCard } from "@/components/invitation-card"
 
 function WorkspaceAccessGuard({ children }: { children: React.ReactNode }) {
-  const { hasWorkspaceAccess, loading, refreshWorkspaces } = useWorkspace()
+  const { hasWorkspaceAccess, loading, refreshWorkspaces, approvalInProgress } = useWorkspace()
   const { user } = useUser()
   const { signOut } = useClerk()
   const { session } = useSession()
@@ -28,6 +28,12 @@ function WorkspaceAccessGuard({ children }: { children: React.ReactNode }) {
   // Check if current page requires workspace validation
   const requiresWorkspaceAccess = () => {
     if (typeof window === 'undefined') return true // SSR - require validation
+
+    // Skip validation when workspace approval is in progress
+    if (approvalInProgress) {
+      console.log('🔐 Workspace approval in progress - skipping validation')
+      return false
+    }
 
     const currentPath = window.location.pathname
 

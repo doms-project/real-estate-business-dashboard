@@ -30,7 +30,7 @@ export function WorkspaceRequestsPanel() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
   const { toast } = useToast()
-  const { refreshWorkspaces } = useWorkspace()
+  const { refreshWorkspaces, setApprovalInProgress } = useWorkspace()
 
   const fetchRequests = async () => {
     try {
@@ -61,6 +61,7 @@ export function WorkspaceRequestsPanel() {
 
   const handleApprove = async (requestId: string) => {
     setProcessing(requestId)
+    setApprovalInProgress(true)
     try {
       const response = await fetch(`/api/workspace/requests/${requestId}`, {
         method: 'PATCH',
@@ -93,6 +94,7 @@ export function WorkspaceRequestsPanel() {
       })
     } finally {
       setProcessing(null)
+      setApprovalInProgress(false)
     }
   }
 

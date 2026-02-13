@@ -45,6 +45,18 @@ CREATE TABLE websites (
   updated_at TIMESTAMP
 );
 
+-- BUSINESSES TABLE
+CREATE TABLE businesses (
+  id UUID PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  workspace_id TEXT,
+  name TEXT NOT NULL,
+  description TEXT,
+  type TEXT DEFAULT 'marketing',
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
 -- SUBSCRIPTIONS TABLE
 CREATE TABLE subscriptions (
   id UUID PRIMARY KEY,

@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getOrCreateUserWorkspace, getUserWorkspaces } from '@/lib/workspace-helpers'
+import { getOrCreateUserWorkspace, getUserWorkspaces, getUserVisibleWebsites } from '@/lib/workspace-helpers'
 import { activityTracker } from '@/lib/activity-tracker'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * GET /api/websites - Fetch workspace websites
+ * GET /api/websites - Fetch workspace websites with role-based access control
+ * - Owners/Admins: see all websites in their workspaces
+ * - Members: see only their own websites in workspaces
+ * - Also includes legacy websites (workspace_id = null) created by the user
  */
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await auth()
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -27,33 +30,32 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Get user's workspaces (handle case where workspace tables don't exist yet)
-    let workspaceIds: string[] = []
+    // Get websites visible to user based on their workspace roles
+    let websites
     try {
-      const workspaces = await getUserWorkspaces(userId)
-      workspaceIds = workspaces.map(w => w.id)
-    } catch (workspaceError: any) {
-      // If workspace tables don't exist, fall back to user_id filtering
-      console.warn('Could not fetch workspaces, falling back to user_id filter:', workspaceError.message)
+      websites = await getUserVisibleWebsites(userId)
+    } catch (error: any) {
+      // If workspace system fails, fall back to legacy user_id filtering
+      console.warn('Could not fetch websites with role-based filtering, falling back to user_id filter:', error.message)
+
+      const { data, error: fallbackError } = await supabaseAdmin
+        .from('websites')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (fallbackError) {
+        console.error('Error in fallback website fetch:', fallbackError)
+        return NextResponse.json(
+          { error: 'Failed to fetch websites', details: fallbackError.message },
+          { status: 500 }
+        )
+      }
+
+      websites = data || []
     }
 
-    // Build query - always filter by user_id to ensure we get all user's websites
-    // This ensures websites are found even if workspace system has issues
-    const { data, error } = await supabaseAdmin
-      .from('websites')
-      .select('*')
-      .eq('user_id', userId) // Always filter by user_id - this is the primary filter
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching websites:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch websites', details: error.message },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ websites: data || [] })
+    return NextResponse.json({ websites })
   } catch (error: any) {
     console.error('Error in GET /api/websites:', error)
     return NextResponse.json(

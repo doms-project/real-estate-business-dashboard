@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getUserVisibleBusinesses } from '@/lib/workspace-helpers'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,50 +22,91 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
     }
 
-    // DEBUG: First check if ANY businesses exist in the database
-    const { data: allBusinesses, error: allError } = await supabaseAdmin!
-      .from('businesses')
-      .select('id, user_id, name, type')
-      .limit(10)
+    // Get workspace filter from query params
+    const { searchParams } = new URL(request.url)
+    const workspaceId = searchParams.get('workspaceId')
 
-    console.log('🔍 ALL BUSINESSES IN DB:', allBusinesses)
-    console.log('🔍 ALL BUSINESSES ERROR:', allError)
+    console.log('🔍 FETCHING KPIs FOR USER:', userId, workspaceId ? `IN WORKSPACE: ${workspaceId}` : 'ALL WORKSPACES')
 
-    // Get all businesses and campaigns for the user
-    console.log('🔍 FETCHING BUSINESSES FOR USER:', userId)
-    const { data: businesses, error: businessError } = await supabaseAdmin!
-      .from('businesses')
-      .select(`
-        id,
-        name,
-        type,
-        campaigns (
+    // Get businesses visible to user based on their workspace roles
+    let businesses
+    try {
+      if (workspaceId) {
+        // Filter by specific workspace
+        businesses = await getUserVisibleBusinesses(userId)
+        businesses = businesses?.filter(b => b.workspace_id === workspaceId) || []
+        console.log('🏢 BUSINESSES FILTERED BY WORKSPACE:', workspaceId, 'Found:', businesses?.length || 0)
+      } else {
+        // Show all accessible businesses (original behavior)
+        businesses = await getUserVisibleBusinesses(userId)
+        console.log('🏢 BUSINESSES FROM getUserVisibleBusinesses:', businesses?.length || 0)
+      }
+      businesses?.forEach(b => console.log(`  - ${b.name} (${b.id})`))
+    } catch (error: any) {
+      // If workspace system fails, fall back to legacy user_id filtering
+      console.warn('Could not fetch businesses with role-based filtering, falling back to user_id filter:', error.message)
+
+      const { data: fallbackBusinesses, error: fallbackError } = await supabaseAdmin
+        .from('businesses')
+        .select(`
           id,
           name,
-          budget,
-          spent,
-          impressions,
-          clicks,
-          conversions,
-          status,
-          platform,
-          created_at
-        )
-      `)
-      .eq('user_id', userId)
+          type,
+          campaigns (
+            id,
+            name,
+            budget,
+            spent,
+            impressions,
+            clicks,
+            conversions,
+            status,
+            platform,
+            created_at
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
 
-    if (businessError) {
-      console.error('❌ Error fetching business data:', businessError)
-      return NextResponse.json({ error: 'Failed to fetch business data' }, { status: 500 })
+      if (fallbackError) {
+        console.error('Error in fallback business fetch:', fallbackError)
+        return NextResponse.json(
+          { error: 'Failed to fetch businesses', details: fallbackError.message },
+          { status: 500 }
+        )
+      }
+
+      businesses = fallbackBusinesses
+      console.log('✅ FALLBACK BUSINESSES LOADED:', businesses?.length || 0)
     }
 
-    console.log('📊 BUSINESSES FOUND:', businesses?.length || 0)
-    console.log('🔍 BUSINESSES DETAILS:', businesses)
+    // Now get campaign details for the filtered businesses
+    const businessesWithCampaigns = []
+    if (businesses && businesses.length > 0) {
+      for (const business of businesses) {
+        const { data: campaigns, error: campaignsError } = await supabaseAdmin
+          .from('campaigns')
+          .select('*')
+          .eq('business_id', business.id)
 
-    if (!businesses || businesses.length === 0) {
+        if (campaignsError) {
+          console.error(`Error fetching campaigns for business ${business.id}:`, campaignsError)
+        }
+
+        businessesWithCampaigns.push({
+          ...business,
+          campaigns: campaigns || []
+        })
+      }
+    }
+
+    const finalBusinesses = businessesWithCampaigns
+
+    if (!finalBusinesses || finalBusinesses.length === 0) {
       console.log('⚠️ NO BUSINESSES FOUND - returning default KPIs')
       console.log('User ID being used:', userId)
-      console.log('Businesses result:', businesses)
+      console.log('Workspace ID filter:', workspaceId)
+      console.log('Businesses result:', finalBusinesses)
 
       // Return default KPIs if no data exists yet
       const defaultKpis = {
@@ -84,9 +126,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         kpis: defaultKpis,
-        debug: { userId, businessesFound: 0, businesses }
+        debug: { userId, workspaceId, businessesFound: 0, businesses: finalBusinesses }
       })
     }
+
+    businesses = finalBusinesses
+
+    console.log('📊 BUSINESSES FOUND:', businesses?.length || 0)
+    console.log('🔍 BUSINESSES DETAILS:', businesses)
 
     // Calculate KPIs
     let totalRevenue = 0

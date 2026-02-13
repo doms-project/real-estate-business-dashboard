@@ -445,13 +445,12 @@ export async function getUserWorkspaceRequests(userId: string): Promise<Workspac
 }
 
 /**
- * Approve a workspace creation request
+ * Approve a workspace creation request and create the workspace
  */
 export async function approveWorkspaceRequest(
   requestId: string,
-  approverUserId: string,
-  workspaceName: string
-): Promise<WorkspaceCreationRequest> {
+  approverUserId: string
+): Promise<{request: WorkspaceCreationRequest, workspace: Workspace}> {
   if (!supabaseAdmin) {
     throw new Error('Supabase not configured')
   }
@@ -462,7 +461,19 @@ export async function approveWorkspaceRequest(
     throw new Error('You do not have permission to approve workspace requests')
   }
 
-  // Update the request
+  // Get the request first to get the workspace name and requester
+  const { data: existingRequest, error: fetchError } = await supabaseAdmin
+    .from('workspace_creation_requests')
+    .select('*')
+    .eq('id', requestId)
+    .eq('status', 'pending')
+    .single()
+
+  if (fetchError || !existingRequest) {
+    throw new Error(`Request not found or already processed: ${fetchError?.message || 'Unknown error'}`)
+  }
+
+  // Update the request status
   const { data: request, error } = await supabaseAdmin
     .from('workspace_creation_requests')
     .update({
@@ -479,7 +490,39 @@ export async function approveWorkspaceRequest(
     throw new Error(`Failed to approve request: ${error?.message || 'Request not found or already processed'}`)
   }
 
-  return request as WorkspaceCreationRequest
+  // Create the actual workspace
+  const { data: newWorkspace, error: createError } = await supabaseAdmin
+    .from('workspaces')
+    .insert({
+      name: existingRequest.workspace_name,
+      owner_id: existingRequest.requested_by,
+    })
+    .select()
+    .single()
+
+  if (createError || !newWorkspace) {
+    console.error('Failed to create workspace:', createError)
+    throw new Error(`Failed to create workspace: ${createError?.message || 'Unknown error'}`)
+  }
+
+  // Add the requester as owner member
+  const { error: memberError } = await supabaseAdmin
+    .from('workspace_members')
+    .insert({
+      workspace_id: newWorkspace.id,
+      user_id: existingRequest.requested_by,
+      role: 'owner',
+    })
+
+  if (memberError) {
+    console.error('Failed to add workspace member:', memberError)
+    // Don't fail the entire operation, but log the error
+  }
+
+  return {
+    request: request as WorkspaceCreationRequest,
+    workspace: newWorkspace as Workspace
+  }
 }
 
 /**
@@ -627,6 +670,154 @@ export async function getUserWorkspaceRole(
     .single()
 
   return (member?.role as 'admin' | 'member') || null
+}
+
+/**
+ * Get websites visible to a user based on their workspace roles
+ * - Owners/Admins: see all websites in their workspaces
+ * - Members: see only their own websites in workspaces
+ * - Also includes legacy websites (workspace_id = null) created by the user
+ */
+export async function getUserVisibleWebsites(userId: string) {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Get all workspaces the user has access to
+  const userWorkspaces = await getUserWorkspaces(userId)
+  const workspaceIds = userWorkspaces.map(w => w.id)
+
+  if (workspaceIds.length === 0) {
+    // No workspaces - fall back to user_id filtering only (legacy behavior)
+    const { data, error } = await supabaseAdmin
+      .from('websites')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      throw new Error(`Failed to fetch websites: ${error.message}`)
+    }
+
+    return data || []
+  }
+
+  // Build role-based filtering
+  const adminWorkspaceIds: string[] = []
+  const memberWorkspaceIds: string[] = []
+
+  // Check roles for each workspace
+  for (const workspaceId of workspaceIds) {
+    const role = await getUserWorkspaceRole(userId, workspaceId)
+    if (role === 'owner' || role === 'admin') {
+      adminWorkspaceIds.push(workspaceId)
+    } else if (role === 'member') {
+      memberWorkspaceIds.push(workspaceId)
+    }
+  }
+
+  // Build the query conditions
+  const orConditions = []
+
+  // 1. Websites in workspaces where user is owner/admin (see all)
+  if (adminWorkspaceIds.length > 0) {
+    orConditions.push(`workspace_id.in.(${adminWorkspaceIds.join(',')})`)
+  }
+
+  // 2. Websites created by user in workspaces where user is member (see only own)
+  if (memberWorkspaceIds.length > 0) {
+    orConditions.push(`and(workspace_id.in.(${memberWorkspaceIds.join(',')}),user_id.eq.${userId})`)
+  }
+
+  // 3. Legacy websites with no workspace (always see own)
+  orConditions.push(`and(workspace_id.is.null,user_id.eq.${userId})`)
+
+  // Execute the query
+  const { data, error } = await supabaseAdmin
+    .from('websites')
+    .select('*')
+    .or(orConditions.join(','))
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch websites: ${error.message}`)
+  }
+
+  return data || []
+}
+
+/**
+ * Get businesses visible to a user based on their workspace roles
+ * - Owners/Admins: see all businesses in their workspaces
+ * - Members: see only their own businesses in workspaces
+ * - Also includes legacy businesses (workspace_id = null) created by the user
+ */
+export async function getUserVisibleBusinesses(userId: string) {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase not configured')
+  }
+
+  // Get all workspaces the user has access to
+  const userWorkspaces = await getUserWorkspaces(userId)
+  const workspaceIds = userWorkspaces.map(w => w.id)
+
+  if (workspaceIds.length === 0) {
+    // No workspaces - fall back to user_id filtering only (legacy behavior)
+    const { data, error } = await supabaseAdmin
+      .from('businesses')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      throw new Error(`Failed to fetch businesses: ${error.message}`)
+    }
+
+    return data || []
+  }
+
+  // Build role-based filtering
+  const adminWorkspaceIds: string[] = []
+  const memberWorkspaceIds: string[] = []
+
+  // Check roles for each workspace
+  for (const workspaceId of workspaceIds) {
+    const role = await getUserWorkspaceRole(userId, workspaceId)
+    if (role === 'owner' || role === 'admin') {
+      adminWorkspaceIds.push(workspaceId)
+    } else if (role === 'member') {
+      memberWorkspaceIds.push(workspaceId)
+    }
+  }
+
+  // Build the query conditions
+  const orConditions = []
+
+  // 1. Businesses in workspaces where user is owner/admin (see all)
+  if (adminWorkspaceIds.length > 0) {
+    orConditions.push(`workspace_id.in.(${adminWorkspaceIds.join(',')})`)
+  }
+
+  // 2. Businesses created by user in workspaces where user is member (see only own)
+  if (memberWorkspaceIds.length > 0) {
+    orConditions.push(`and(workspace_id.in.(${memberWorkspaceIds.join(',')}),user_id.eq.${userId})`)
+  }
+
+  // 3. Legacy businesses with no workspace (always see own)
+  orConditions.push(`and(workspace_id.is.null,user_id.eq.${userId})`)
+
+  // Execute the query
+  const { data, error } = await supabaseAdmin
+    .from('businesses')
+    .select('*')
+    .or(orConditions.join(','))
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch businesses: ${error.message}`)
+  }
+
+  return data || []
 }
 
 /**
