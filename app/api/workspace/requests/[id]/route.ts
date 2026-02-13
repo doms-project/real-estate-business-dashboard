@@ -32,18 +32,19 @@ export async function PATCH(
     }
 
     if (action === 'approve') {
-      const result = await approveWorkspaceRequest(id, userId, '')
+      const { request, workspace } = await approveWorkspaceRequest(id, userId)
 
-      // Notify real-time subscribers about the approval
+      // Notify real-time subscribers about the approval and new workspace
       notifySubscribers('workspace_requests', {
         type: 'request_approved',
-        data: result
+        data: { request, workspace }
       })
 
       return NextResponse.json({
         success: true,
-        request: result,
-        message: 'Workspace creation request approved'
+        request,
+        workspace,
+        message: 'Workspace creation request approved and workspace created successfully'
       })
     } else {
       const result = await rejectWorkspaceRequest(id, userId, rejectionReason)

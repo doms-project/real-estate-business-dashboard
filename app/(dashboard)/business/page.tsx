@@ -12,9 +12,10 @@ import {
 } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { TrendingUp, DollarSign, Users, Target, Plus, Trash2, RefreshCw, Edit, Save, X } from "lucide-react"
+import { TrendingUp, DollarSign, Users, Target, Plus, Trash2, RefreshCw, Edit, Save, X, Building2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useUser } from "@clerk/nextjs"
+import { useWorkspace } from "@/components/workspace-context"
 
 interface Campaign {
   id: string
@@ -65,6 +66,7 @@ interface EditableBusiness extends Omit<Business, 'campaigns'> {
 
 export default function BusinessPage() {
   const { user } = useUser()
+  const { currentWorkspace } = useWorkspace()
   const [churchBusiness, setChurchBusiness] = useState<EditableBusiness | null>(null)
   const [realEstateBusiness, setRealEstateBusiness] = useState<EditableBusiness | null>(null)
   const [marketingBusiness, setMarketingBusiness] = useState<EditableBusiness | null>(null)
@@ -74,19 +76,21 @@ export default function BusinessPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [autoSaveTimeout, setAutoSaveTimeout] = useState<NodeJS.Timeout | null>(null)
   const [savingCampaigns, setSavingCampaigns] = useState<Set<string>>(new Set())
+  const [editingBusinessId, setEditingBusinessId] = useState<string | null>(null)
+  const [inlineEditingField, setInlineEditingField] = useState<string | null>(null)
 
-  // Fetch businesses, campaigns, and KPIs on mount
+  // Fetch businesses, campaigns, and KPIs on mount and when workspace changes
   useEffect(() => {
-    if (user) {
+    if (user && currentWorkspace?.id) {
       fetchBusinesses()
       fetchKPIs()
     }
-  }, [user])
+  }, [user, currentWorkspace?.id])
 
   const fetchBusinesses = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/business')
+      const response = await fetch(`/api/business?workspaceId=${currentWorkspace?.id}`)
       const data = await response.json()
 
       if (data.success && data.businesses) {
@@ -166,8 +170,8 @@ export default function BusinessPage() {
 
   const fetchKPIs = async () => {
     try {
-      console.log('📊 Fetching KPIs...')
-      const response = await fetch('/api/business/kpis')
+      console.log('📊 Fetching KPIs for workspace:', currentWorkspace?.id)
+      const response = await fetch(`/api/business/kpis?workspaceId=${currentWorkspace?.id || ''}`)
       const data = await response.json()
       console.log('📈 KPIs response:', data)
 
@@ -505,6 +509,120 @@ export default function BusinessPage() {
     setHasUnsavedChanges(true)
   }
 
+  // Add new business
+  const handleAddBusiness = () => {
+    const newBusiness: EditableBusiness = {
+      id: `temp-${Date.now()}`,
+      user_id: user?.id || '',
+      name: '',
+      description: '',
+      type: 'marketing',
+      campaigns: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+
+    // Add as a new business card that will be edited inline
+    setMarketingBusiness(newBusiness) // Default to marketing type
+    setEditingBusinessId(newBusiness.id)
+  }
+
+  // Save new business
+  const saveNewBusiness = async (businessId: string) => {
+    const business = churchBusiness?.id === businessId ? churchBusiness :
+                     realEstateBusiness?.id === businessId ? realEstateBusiness :
+                     marketingBusiness
+
+    if (!business || !business.name.trim()) {
+      alert('Business name is required')
+      return
+    }
+
+    try {
+      const response = await fetch('/api/business', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: business.name.trim(),
+          description: business.description?.trim(),
+          type: business.type,
+          workspaceId: currentWorkspace?.id
+        })
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        // Clear the temporary business and refresh
+        if (churchBusiness?.id === businessId) setChurchBusiness(null)
+        if (realEstateBusiness?.id === businessId) setRealEstateBusiness(null)
+        if (marketingBusiness?.id === businessId) setMarketingBusiness(null)
+
+        setEditingBusinessId(null)
+        fetchBusinesses() // Refresh to show the new business
+      } else {
+        alert(`Failed to create business: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('Failed to create business:', error)
+      alert('Failed to create business')
+    }
+  }
+
+  // Cancel editing business
+  const cancelEditingBusiness = (businessId: string) => {
+    // Remove the temporary business if it's a temp ID
+    if (businessId.startsWith('temp-')) {
+      if (churchBusiness?.id === businessId) setChurchBusiness(null)
+      if (realEstateBusiness?.id === businessId) setRealEstateBusiness(null)
+      if (marketingBusiness?.id === businessId) setMarketingBusiness(null)
+    }
+
+    setEditingBusinessId(null)
+  }
+
+  // Delete business
+  const deleteBusiness = async (businessId: string, businessName: string) => {
+    if (!confirm(`Are you sure you want to delete "${businessName}"? This will also delete all associated campaigns and cannot be undone.`)) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/business/${businessId}`, {
+        method: 'DELETE'
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        // Clear the business from state and refresh
+        if (churchBusiness?.id === businessId) setChurchBusiness(null)
+        if (realEstateBusiness?.id === businessId) setRealEstateBusiness(null)
+        if (marketingBusiness?.id === businessId) setMarketingBusiness(null)
+
+        fetchBusinesses() // Refresh the business list
+        fetchKPIs() // Refresh KPIs
+      } else {
+        alert(`Failed to delete business: ${data.error}`)
+      }
+    } catch (error) {
+      console.error('Failed to delete business:', error)
+      alert('Failed to delete business')
+    }
+  }
+
+  // Update business field
+  const updateBusinessField = (businessId: string, field: keyof EditableBusiness, value: any) => {
+    const updateBusiness = (business: EditableBusiness | null) => {
+      if (!business || business.id !== businessId) return business
+      return { ...business, [field]: value }
+    }
+
+    setChurchBusiness(prev => updateBusiness(prev))
+    setRealEstateBusiness(prev => updateBusiness(prev))
+    setMarketingBusiness(prev => updateBusiness(prev))
+  }
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
@@ -537,6 +655,10 @@ export default function BusinessPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button onClick={handleAddBusiness}>
+            <Building2 className="mr-2 h-4 w-4" />
+            Add Business
+          </Button>
           <Button variant="outline" disabled>
             <TrendingUp className="mr-2 h-4 w-4" />
             Coming Soon
@@ -657,23 +779,119 @@ export default function BusinessPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  {churchBusiness.name}
-                </CardTitle>
-                <CardDescription>
-                  {churchBusiness.campaigns.length} campaigns • Campaign performance and metrics
-                </CardDescription>
+              <div className="flex-1">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    {inlineEditingField === `name-${churchBusiness.id}` ? (
+                      <Input
+                        value={churchBusiness.name}
+                        onChange={(e) => updateBusinessField(churchBusiness.id, 'name', e.target.value)}
+                        onBlur={() => setInlineEditingField(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') setInlineEditingField(null)
+                          if (e.key === 'Escape') setInlineEditingField(null)
+                        }}
+                        className="text-lg font-semibold border-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <CardTitle
+                        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex items-center gap-2"
+                        onDoubleClick={() => setInlineEditingField(`name-${churchBusiness.id}`)}
+                      >
+                        <Target className="h-5 w-5" />
+                        {churchBusiness.name || 'Unnamed Business'}
+                      </CardTitle>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {inlineEditingField === `description-${churchBusiness.id}` ? (
+                      <Input
+                        value={churchBusiness.description || ''}
+                        onChange={(e) => updateBusinessField(churchBusiness.id, 'description', e.target.value)}
+                        onBlur={() => setInlineEditingField(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') setInlineEditingField(null)
+                          if (e.key === 'Escape') setInlineEditingField(null)
+                        }}
+                        placeholder="Business description (optional)"
+                        className="border-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <CardDescription
+                        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex-1"
+                        onDoubleClick={() => setInlineEditingField(`description-${churchBusiness.id}`)}
+                      >
+                        {churchBusiness.description || 'No description'}
+                      </CardDescription>
+                    )}
+
+                    {inlineEditingField === `type-${churchBusiness.id}` ? (
+                      <Select
+                        value={churchBusiness.type}
+                        onValueChange={(value) => {
+                          updateBusinessField(churchBusiness.id, 'type', value);
+                          setInlineEditingField(null);
+                        }}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="church">Church</SelectItem>
+                          <SelectItem value="marketing">Marketing</SelectItem>
+                          <SelectItem value="real_estate">Real Estate</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    <span
+                      className="cursor-pointer hover:text-foreground"
+                      onDoubleClick={() => setInlineEditingField(`type-${churchBusiness.id}`)}
+                    >
+                      {churchBusiness.type === 'real_estate' ? 'Real Estate' :
+                       churchBusiness.type === 'marketing' ? 'Marketing' :
+                       churchBusiness.type === 'church' ? 'Church' : churchBusiness.type}
+                    </span> • {churchBusiness.campaigns.length} campaigns • Campaign performance and metrics
+                  </div>
+
+                  {inlineEditingField?.startsWith(`name-${churchBusiness.id}`) ||
+                   inlineEditingField?.startsWith(`description-${churchBusiness.id}`) ||
+                   inlineEditingField === `type-${churchBusiness.id}` ? (
+                    <div className="flex gap-2 pt-2">
+                      <Button size="sm" onClick={() => setInlineEditingField(null)}>
+                        <Save className="h-4 w-4 mr-1" />
+                        Done
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => addNewCampaign(churchBusiness.id)}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Campaign
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addNewCampaign(churchBusiness.id)}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Campaign
+                </Button>
+                {!churchBusiness.id.startsWith('temp-') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => deleteBusiness(churchBusiness.id, churchBusiness.name)}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Business
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -891,23 +1109,119 @@ export default function BusinessPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  {realEstateBusiness.name}
-                </CardTitle>
-                <CardDescription>
-                  {realEstateBusiness.campaigns.length} campaigns • Campaign performance and metrics
-                </CardDescription>
+              <div className="flex-1">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    {inlineEditingField === `name-${realEstateBusiness.id}` ? (
+                      <Input
+                        value={realEstateBusiness.name}
+                        onChange={(e) => updateBusinessField(realEstateBusiness.id, 'name', e.target.value)}
+                        onBlur={() => setInlineEditingField(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') setInlineEditingField(null)
+                          if (e.key === 'Escape') setInlineEditingField(null)
+                        }}
+                        className="text-lg font-semibold border-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <CardTitle
+                        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex items-center gap-2"
+                        onDoubleClick={() => setInlineEditingField(`name-${realEstateBusiness.id}`)}
+                      >
+                        <Target className="h-5 w-5" />
+                        {realEstateBusiness.name || 'Unnamed Business'}
+                      </CardTitle>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {inlineEditingField === `description-${realEstateBusiness.id}` ? (
+                      <Input
+                        value={realEstateBusiness.description || ''}
+                        onChange={(e) => updateBusinessField(realEstateBusiness.id, 'description', e.target.value)}
+                        onBlur={() => setInlineEditingField(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') setInlineEditingField(null)
+                          if (e.key === 'Escape') setInlineEditingField(null)
+                        }}
+                        placeholder="Business description (optional)"
+                        className="border-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <CardDescription
+                        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex-1"
+                        onDoubleClick={() => setInlineEditingField(`description-${realEstateBusiness.id}`)}
+                      >
+                        {realEstateBusiness.description || 'No description'}
+                      </CardDescription>
+                    )}
+
+                    {inlineEditingField === `type-${realEstateBusiness.id}` ? (
+                      <Select
+                        value={realEstateBusiness.type}
+                        onValueChange={(value) => {
+                          updateBusinessField(realEstateBusiness.id, 'type', value);
+                          setInlineEditingField(null);
+                        }}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="church">Church</SelectItem>
+                          <SelectItem value="marketing">Marketing</SelectItem>
+                          <SelectItem value="real_estate">Real Estate</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    <span
+                      className="cursor-pointer hover:text-foreground"
+                      onDoubleClick={() => setInlineEditingField(`type-${realEstateBusiness.id}`)}
+                    >
+                      {realEstateBusiness.type === 'real_estate' ? 'Real Estate' :
+                       realEstateBusiness.type === 'marketing' ? 'Marketing' :
+                       realEstateBusiness.type === 'church' ? 'Church' : realEstateBusiness.type}
+                    </span> • {realEstateBusiness.campaigns.length} campaigns • Campaign performance and metrics
+                  </div>
+
+                  {inlineEditingField?.startsWith(`name-${realEstateBusiness.id}`) ||
+                   inlineEditingField?.startsWith(`description-${realEstateBusiness.id}`) ||
+                   inlineEditingField === `type-${realEstateBusiness.id}` ? (
+                    <div className="flex gap-2 pt-2">
+                      <Button size="sm" onClick={() => setInlineEditingField(null)}>
+                        <Save className="h-4 w-4 mr-1" />
+                        Done
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => addNewCampaign(realEstateBusiness.id)}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Campaign
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addNewCampaign(realEstateBusiness.id)}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Campaign
+                </Button>
+                {!realEstateBusiness.id.startsWith('temp-') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => deleteBusiness(realEstateBusiness.id, realEstateBusiness.name)}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Business
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -1111,23 +1425,119 @@ export default function BusinessPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  {marketingBusiness.name}
-                </CardTitle>
-                <CardDescription>
-                  {marketingBusiness.campaigns.length} campaigns • Campaign performance and metrics
-                </CardDescription>
+              <div className="flex-1">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    {inlineEditingField === `name-${marketingBusiness.id}` ? (
+                      <Input
+                        value={marketingBusiness.name}
+                        onChange={(e) => updateBusinessField(marketingBusiness.id, 'name', e.target.value)}
+                        onBlur={() => setInlineEditingField(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') setInlineEditingField(null)
+                          if (e.key === 'Escape') setInlineEditingField(null)
+                        }}
+                        className="text-lg font-semibold border-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <CardTitle
+                        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex items-center gap-2"
+                        onDoubleClick={() => setInlineEditingField(`name-${marketingBusiness.id}`)}
+                      >
+                        <Target className="h-5 w-5" />
+                        {marketingBusiness.name || 'Unnamed Business'}
+                      </CardTitle>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {inlineEditingField === `description-${marketingBusiness.id}` ? (
+                      <Input
+                        value={marketingBusiness.description || ''}
+                        onChange={(e) => updateBusinessField(marketingBusiness.id, 'description', e.target.value)}
+                        onBlur={() => setInlineEditingField(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') setInlineEditingField(null)
+                          if (e.key === 'Escape') setInlineEditingField(null)
+                        }}
+                        placeholder="Business description (optional)"
+                        className="border-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <CardDescription
+                        className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex-1"
+                        onDoubleClick={() => setInlineEditingField(`description-${marketingBusiness.id}`)}
+                      >
+                        {marketingBusiness.description || 'No description'}
+                      </CardDescription>
+                    )}
+
+                    {inlineEditingField === `type-${marketingBusiness.id}` ? (
+                      <Select
+                        value={marketingBusiness.type}
+                        onValueChange={(value) => {
+                          updateBusinessField(marketingBusiness.id, 'type', value);
+                          setInlineEditingField(null);
+                        }}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="church">Church</SelectItem>
+                          <SelectItem value="marketing">Marketing</SelectItem>
+                          <SelectItem value="real_estate">Real Estate</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    <span
+                      className="cursor-pointer hover:text-foreground"
+                      onDoubleClick={() => setInlineEditingField(`type-${marketingBusiness.id}`)}
+                    >
+                      {marketingBusiness.type === 'real_estate' ? 'Real Estate' :
+                       marketingBusiness.type === 'marketing' ? 'Marketing' :
+                       marketingBusiness.type === 'church' ? 'Church' : marketingBusiness.type}
+                    </span> • {marketingBusiness.campaigns.length} campaigns • Campaign performance and metrics
+                  </div>
+
+                  {inlineEditingField?.startsWith(`name-${marketingBusiness.id}`) ||
+                   inlineEditingField?.startsWith(`description-${marketingBusiness.id}`) ||
+                   inlineEditingField === `type-${marketingBusiness.id}` ? (
+                    <div className="flex gap-2 pt-2">
+                      <Button size="sm" onClick={() => setInlineEditingField(null)}>
+                        <Save className="h-4 w-4 mr-1" />
+                        Done
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => addNewCampaign(marketingBusiness.id)}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Campaign
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addNewCampaign(marketingBusiness.id)}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Campaign
+                </Button>
+                {!marketingBusiness.id.startsWith('temp-') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => deleteBusiness(marketingBusiness.id, marketingBusiness.name)}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Business
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>

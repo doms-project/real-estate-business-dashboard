@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getUserVisibleBusinesses } from '@/lib/workspace-helpers'
 
 /**
  * GET /api/business/[businessId]/campaigns - Get campaigns for a specific business
@@ -22,16 +23,12 @@ export async function GET(
       return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
     }
 
-    // Verify business ownership
-    const { data: business, error: businessError } = await supabaseAdmin!
-      .from('businesses')
-      .select('id')
-      .eq('id', businessId)
-      .eq('user_id', userId)
-      .single()
+    // Verify business is visible to user based on workspace permissions
+    const visibleBusinesses = await getUserVisibleBusinesses(userId)
+    const business = visibleBusinesses.find(b => b.id === businessId)
 
-    if (businessError || !business) {
-      return NextResponse.json({ error: 'Business not found' }, { status: 404 })
+    if (!business) {
+      return NextResponse.json({ error: 'Business not found or access denied' }, { status: 404 })
     }
 
     // Get campaigns for this business
@@ -86,19 +83,13 @@ export async function POST(
 
     console.log('🔍 Verifying business ownership...')
 
-    // Verify business ownership
-    const { data: business, error: businessError } = await supabaseAdmin!
-      .from('businesses')
-      .select('id')
-      .eq('id', businessId)
-      .eq('user_id', userId)
-      .single()
+    // Verify business is visible to user based on workspace permissions
+    const visibleBusinesses = await getUserVisibleBusinesses(userId)
+    const business = visibleBusinesses.find(b => b.id === businessId)
 
-    console.log('🏢 Business lookup result:', { business, error: businessError })
-
-    if (businessError || !business) {
+    if (!business) {
       console.log('❌ Business not found or access denied')
-      return NextResponse.json({ error: 'Business not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Business not found or access denied' }, { status: 404 })
     }
 
     console.log('📨 Parsing request body...')

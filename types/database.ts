@@ -220,6 +220,38 @@ export interface Database {
           updated_at?: string
         }
       }
+      businesses: {
+        Row: {
+          id: string
+          user_id: string
+          workspace_id: string | null
+          name: string
+          description: string | null
+          type: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          workspace_id?: string | null
+          name: string
+          description?: string | null
+          type?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          workspace_id?: string | null
+          name?: string
+          description?: string | null
+          type?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
       rent_roll_units: {
         Row: {
           id: string
@@ -460,6 +492,7 @@ export type BlopRow = Database['public']['Tables']['blops']['Row']
 export type WebsiteRow = Database['public']['Tables']['websites']['Row']
 export type SubscriptionRow = Database['public']['Tables']['subscriptions']['Row']
 export type PropertyRow = Database['public']['Tables']['properties']['Row']
+export type BusinessRow = Database['public']['Tables']['businesses']['Row']
 export type RentRollUnitRow = Database['public']['Tables']['rent_roll_units']['Row']
 export type WorkRequestRow = Database['public']['Tables']['work_requests']['Row']
 export type AgencyClientRow = Database['public']['Tables']['agency_clients']['Row']

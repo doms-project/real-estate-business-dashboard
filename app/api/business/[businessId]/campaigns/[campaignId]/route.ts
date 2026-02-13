@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getUserVisibleBusinesses } from '@/lib/workspace-helpers'
 
 /**
  * PUT /api/business/[businessId]/campaigns/[campaignId] - Update a campaign
@@ -22,13 +23,20 @@ export async function PUT(
       return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
     }
 
-    // Verify campaign ownership through business
+    // Verify business is visible to user based on workspace permissions
+    const visibleBusinesses = await getUserVisibleBusinesses(userId)
+    const business = visibleBusinesses.find(b => b.id === businessId)
+
+    if (!business) {
+      return NextResponse.json({ error: 'Business not found or access denied' }, { status: 404 })
+    }
+
+    // Verify campaign belongs to the business
     const { data: campaign, error: campaignError } = await supabaseAdmin!
       .from('campaigns')
       .select('id, business_id')
       .eq('id', campaignId)
       .eq('business_id', businessId)
-      .eq('user_id', userId)
       .single()
 
     if (campaignError || !campaign) {
@@ -134,13 +142,20 @@ export async function DELETE(
       return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
     }
 
-    // Verify campaign ownership
+    // Verify business is visible to user based on workspace permissions
+    const visibleBusinesses = await getUserVisibleBusinesses(userId)
+    const business = visibleBusinesses.find(b => b.id === businessId)
+
+    if (!business) {
+      return NextResponse.json({ error: 'Business not found or access denied' }, { status: 404 })
+    }
+
+    // Verify campaign belongs to the business
     const { data: campaign, error: campaignError } = await supabaseAdmin!
       .from('campaigns')
       .select('id')
       .eq('id', campaignId)
       .eq('business_id', businessId)
-      .eq('user_id', userId)
       .single()
 
     if (campaignError || !campaign) {
@@ -151,7 +166,6 @@ export async function DELETE(
       .from('campaigns')
       .delete()
       .eq('id', campaignId)
-      .eq('user_id', userId)
 
     if (error) {
       console.error('Error deleting campaign:', error)

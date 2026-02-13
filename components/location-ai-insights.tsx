@@ -45,8 +45,8 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
     healthScore: pageData?.healthScore
   })
 
-  // Note: Removed useWorkspace hook to prevent unnecessary workspace validation
-  // Since locations are global, we don't need workspace context here
+  // Use workspace context for AI coach authorization
+  const { currentWorkspace } = useWorkspace()
 
   // Legacy insights (kept for backward compatibility)
   const [insights, setInsights] = useState<AIInsight[]>([])
@@ -70,7 +70,7 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
   console.log('🤖 AI Coordinator initialized:', { isLoading, hasMakeAIRequest: !!makeAIRequest })
 
   // Enhanced AI service with retry logic
-  const callAIWithRetry = useCallback(async (prompt: string, maxRetries = 2): Promise<Response> => {
+  const callAIWithRetry = useCallback(async (prompt: string, maxRetries = 2): Promise<{ response: Response, responseText: string }> => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`🤖 AI attempt ${attempt}/${maxRetries}`)
@@ -87,7 +87,7 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
               pageContext: 'location-compact',
               useStreaming: false,
               model: selectedModel === 'auto' ? null : selectedModel,
-              workspaceId: null, // Locations are global, no workspace context needed
+              workspaceId: currentWorkspace?.id || null, // Use current workspace for AI coach authorization
               pageData: {
                 locationId,
                 locationName,
@@ -109,22 +109,28 @@ export function LocationAIInsights({ locationId, locationName, analytics, pageDa
           })
         })
 
+        // Read response text immediately to avoid stream issues
+        const responseText = await response.text()
+        console.log(`📄 Response received, length: ${responseText.length}`)
+
         if (response.ok) {
           console.log(`✅ AI attempt ${attempt} successful`)
-          return response
+          return { response, responseText }
         }
 
-        const errorText = await response.text()
         console.warn(`⚠️ AI attempt ${attempt} failed:`, {
           status: response.status,
           statusText: response.statusText,
-          error: errorText.substring(0, 200)
+          error: responseText.substring(0, 200)
         })
 
-        // Don't retry on client errors (4xx)
+        // Don't retry on client errors (4xx) - throw error immediately
         if (response.status >= 400 && response.status < 500) {
           console.log('🚫 Client error - not retrying')
-          return response
+          const errorMessage = responseText && responseText !== 'null'
+            ? responseText
+            : `HTTP ${response.status}: ${response.statusText}`
+          throw new Error(`AI service error: ${errorMessage}`)
         }
 
         // Retry on server errors (5xx) or network issues
@@ -240,8 +246,33 @@ RESPONSE:`
 
     console.log('📝 Chat prompt prepared, calling AI service')
 
-    const response = await callAIWithRetry(chatPrompt, 2)
-    const data = await response.json()
+    const { response, responseText } = await callAIWithRetry(chatPrompt, 2)
+
+    // Check if responseText is valid
+    if (!responseText || responseText.trim().length === 0) {
+      throw new Error('AI service returned empty response')
+    }
+
+    let data
+    try {
+      data = JSON.parse(responseText)
+    } catch (parseError) {
+      console.error('❌ JSON parse error in chat response:', parseError)
+      throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Parse failed'}`)
+    }
+
+    // Check if data is valid and has expected structure
+    if (data === null || data === undefined || typeof data !== 'object') {
+      console.error('❌ Invalid data structure in chat response:', data, 'Type:', typeof data)
+      throw new Error('AI service returned invalid data structure')
+    }
+
+    // Check if this is an API error response
+    if (data.error) {
+      console.error('❌ API Error Response in chat:', data.error, data.message)
+      throw new Error(data.message || data.error || 'AI coach API error')
+    }
+
     const aiResponse = data.reply || data.response || ''
 
     if (!aiResponse.trim()) {
@@ -670,13 +701,15 @@ Format as JSON array with actionable business intelligence:
         useCustomPrompt
       })
 
-      const response = await callAIWithRetry(prompt)
+      const { response, responseText } = await callAIWithRetry(prompt)
 
       console.log('📡 AI API call completed, processing response')
+      console.log('📄 Raw response received, length:', responseText?.length || 0)
 
-      // Read response body ONCE to avoid double-read error
-      const responseText = await response.text()
-      console.log('📄 Raw response received, length:', responseText.length)
+      // Check if responseText is valid
+      if (!responseText || responseText.trim().length === 0) {
+        throw new Error('AI service returned empty response')
+      }
 
       let data
       try {
@@ -686,6 +719,18 @@ Format as JSON array with actionable business intelligence:
         console.error('❌ JSON parse error:', parseError)
         console.error('❌ Raw response text (first 500 chars):', responseText.substring(0, 500))
         throw new Error(`Invalid JSON response from AI: ${parseError instanceof Error ? parseError.message : 'Parse failed'}`)
+      }
+
+      // Check if data is valid and has expected structure
+      if (data === null || data === undefined || typeof data !== 'object') {
+        console.error('❌ Invalid data structure:', data, 'Type:', typeof data)
+        throw new Error('AI service returned invalid data structure')
+      }
+
+      // Check if this is an API error response
+      if (data.error) {
+        console.error('❌ API Error Response:', data.error, data.message)
+        throw new Error(data.message || data.error || 'AI coach API error')
       }
 
       console.log('📊 Response data structure:', {

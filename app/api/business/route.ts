@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getOrCreateUserWorkspace, getUserVisibleBusinesses } from '@/lib/workspace-helpers'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * GET /api/business - Get all businesses for the authenticated user
+ * GET /api/business - Fetch workspace businesses with role-based access control
+ * - Owners/Admins: see all businesses in their workspaces
+ * - Members: see only their own businesses in workspaces
+ * - Also includes legacy businesses (workspace_id = null) created by the user
  */
 export async function GET(request: NextRequest) {
   try {
@@ -19,19 +23,85 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
     }
 
-    // Get businesses with their campaigns
-    const { data: businesses, error } = await supabaseAdmin!
-      .from('businesses')
-      .select(`
-        *,
-        campaigns (*)
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true })
+    // Get workspace filter from query params
+    const { searchParams } = new URL(request.url)
+    const workspaceId = searchParams.get('workspaceId')
 
-    if (error) {
-      console.error('Error fetching businesses:', error)
-      return NextResponse.json({ error: 'Failed to fetch businesses' }, { status: 500 })
+    // Get businesses visible to user based on their workspace roles
+    let businesses
+    try {
+      if (workspaceId) {
+        // Filter by specific workspace
+        businesses = await getUserVisibleBusinesses(userId)
+        businesses = businesses?.filter(b => b.workspace_id === workspaceId) || []
+        console.log('🏢 BUSINESSES FILTERED BY WORKSPACE:', workspaceId, 'Found:', businesses?.length || 0)
+      } else {
+        // Show all accessible businesses (original behavior)
+        businesses = await getUserVisibleBusinesses(userId)
+        console.log('🏢 BUSINESSES FROM getUserVisibleBusinesses:', businesses?.length || 0)
+      }
+      businesses?.forEach(b => console.log(`  - ${b.name} (${b.id})`))
+    } catch (error: any) {
+      // If workspace system fails, fall back to legacy user_id filtering
+      console.warn('Could not fetch businesses with role-based filtering, falling back to user_id filter:', error.message)
+
+      const { data, error: fallbackError } = await supabaseAdmin
+        .from('businesses')
+        .select(`
+          *,
+          campaigns (*)
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (fallbackError) {
+        console.error('Error in fallback business fetch:', fallbackError)
+        return NextResponse.json(
+          { error: 'Failed to fetch businesses', details: fallbackError.message },
+          { status: 500 }
+        )
+      }
+
+      businesses = data || []
+    }
+
+    // Get campaigns for visible businesses
+    if (businesses && businesses.length > 0) {
+      const businessIds = businesses.map(b => b.id)
+      console.log('🔍 BUSINESS IDS for campaign query:', businessIds)
+
+      const { data: campaigns, error: campaignsError } = await supabaseAdmin
+        .from('campaigns')
+        .select('*')
+        .in('business_id', businessIds)
+        .order('created_at', { ascending: false })
+
+      console.log('📊 CAMPAIGNS FETCHED:', campaigns?.length || 0, 'campaigns')
+      console.log('📊 CAMPAIGNS ERROR:', campaignsError)
+
+      if (!campaignsError && campaigns) {
+        // Group campaigns by business_id
+        const campaignsByBusiness = campaigns.reduce((acc, campaign) => {
+          if (!acc[campaign.business_id]) {
+            acc[campaign.business_id] = []
+          }
+          acc[campaign.business_id].push(campaign)
+          return acc
+        }, {} as Record<string, any[]>)
+
+        console.log('📊 CAMPAIGNS GROUPED BY BUSINESS:', Object.keys(campaignsByBusiness))
+
+        // Add campaigns to businesses
+        businesses = businesses.map(business => ({
+          ...business,
+          campaigns: campaignsByBusiness[business.id] || []
+        }))
+
+        console.log('📊 BUSINESSES WITH CAMPAIGNS ATTACHED:')
+        businesses.forEach(b => {
+          console.log(`  ${b.name}: ${b.campaigns?.length || 0} campaigns`)
+        })
+      }
     }
 
     return NextResponse.json({
@@ -61,16 +131,30 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, description, type } = body
+    const { name, description, type, workspaceId } = body
 
     if (!name) {
       return NextResponse.json({ error: 'Business name is required' }, { status: 400 })
+    }
+
+    // Get or create workspace (handle case where workspace tables don't exist yet)
+    let targetWorkspaceId = workspaceId
+    try {
+      if (!targetWorkspaceId) {
+        const workspace = await getOrCreateUserWorkspace(userId)
+        targetWorkspaceId = workspace.id
+      }
+    } catch (workspaceError: any) {
+      // If workspace tables don't exist, use null workspace_id (legacy behavior)
+      console.warn('Could not get/create workspace, using null workspace_id:', workspaceError.message)
+      targetWorkspaceId = null
     }
 
     const { data: business, error } = await supabaseAdmin!
       .from('businesses')
       .insert({
         user_id: userId,
+        workspace_id: targetWorkspaceId,
         name,
         description,
         type: type || 'marketing'

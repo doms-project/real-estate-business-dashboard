@@ -247,7 +247,7 @@ function setupRealtimeSubscriptions() {
     console.log('📊 Setting up location metrics real-time subscription...')
 
     try {
-      const channel = supabase
+      const channel = supabaseAdminFallback
         .channel('location_metrics_realtime')
         .on('postgres_changes', {
           event: 'INSERT',
@@ -295,7 +295,7 @@ function setupRealtimeSubscriptions() {
   console.log('📝 Setting up activities real-time subscription...')
 
   try {
-    supabase
+    supabaseAdminFallback
       .channel('activities_realtime')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -342,7 +342,7 @@ function setupRealtimeSubscriptions() {
   console.log('🏢 Setting up workspaces real-time subscription...')
 
   try {
-    supabase
+    supabaseAdminFallback
       .channel('workspaces_realtime')
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -378,7 +378,7 @@ function setupRealtimeSubscriptions() {
     console.log('📌 Setting up blops real-time subscription...')
 
     try {
-      supabase
+      supabaseAdminFallback
         .channel('blops_realtime')
         .on('postgres_changes', {
           event: 'INSERT',
