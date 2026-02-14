@@ -116,6 +116,78 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * PUT /api/business - Update an existing business
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const { userId } = await auth()
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: 'Database connection failed' }, { status: 500 })
+    }
+
+    const body = await request.json()
+    const { id, name, description, type, workspaceId } = body
+
+    if (!id) {
+      return NextResponse.json({ error: 'Business ID is required' }, { status: 400 })
+    }
+
+    // Verify the business belongs to the user and workspace
+    const { data: existingBusiness, error: fetchError } = await supabaseAdmin
+      .from('businesses')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single()
+
+    if (fetchError || !existingBusiness) {
+      return NextResponse.json({ error: 'Business not found or access denied' }, { status: 404 })
+    }
+
+    // If workspaceId is provided, verify it matches (allow updating null workspace_id to a valid workspace)
+    if (workspaceId && existingBusiness.workspace_id && existingBusiness.workspace_id !== workspaceId) {
+      return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
+    }
+
+    // Update the business - only update fields that are provided
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    }
+
+    if (name !== undefined) updateData.name = name
+    if (description !== undefined) updateData.description = description
+    if (type !== undefined) updateData.type = type
+
+    const { data: updatedBusiness, error: updateError } = await supabaseAdmin
+      .from('businesses')
+      .update(updateData)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single()
+
+    if (updateError) {
+      console.error('Error updating business:', updateError)
+      return NextResponse.json({ error: 'Failed to update business' }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      success: true,
+      business: updatedBusiness
+    })
+
+  } catch (error) {
+    console.error('Business update error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
  * POST /api/business - Create a new business
  */
 export async function POST(request: NextRequest) {

@@ -5,9 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Plus, ExternalLink, Edit, Trash2, Check, X, Loader2 } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Plus, ExternalLink, Edit, Trash2, Check, X, Loader2, BarChart, Copy, CheckCircle2, RefreshCw } from "lucide-react"
 import { SaveButton } from "@/components/ui/save-button"
 import { useUser } from "@clerk/nextjs"
+import { WebsiteAnalyticsDashboard } from "@/components/analytics/website-analytics-dashboard"
 
 interface Website {
   id: string
@@ -23,6 +25,30 @@ interface Website {
   }
 }
 
+interface WebsiteAnalytics {
+  pageViews: number
+  uniqueVisitors: number
+  sessions: number
+  avgSessionDuration: number
+  bounceRate?: number
+  eventsCount: number
+  topPages: Array<{ page: string; views: number }>
+  trafficSources: Record<string, number>
+  geographicData?: Array<{ country: string; visitors: number }>
+  percentageChanges?: {
+    pageViews: number | null
+    uniqueVisitors: number | null
+    sessions: number | null
+    avgSessionDuration: number | null
+    bounceRate: number | null
+  }
+  recentPageViews: Array<any>
+  recentEvents: Array<any>
+  visitors?: Array<any>
+  lastUpdated: string
+  hasEverBeenTracked?: boolean
+}
+
 export default function WebsitesPage() {
   const { user } = useUser()
   const [websites, setWebsites] = useState<Website[]>([])
@@ -30,6 +56,14 @@ export default function WebsitesPage() {
   const [hasLoadedFromDB, setHasLoadedFromDB] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // Analytics state
+  const [websiteAnalytics, setWebsiteAnalytics] = useState<Record<string, WebsiteAnalytics>>({})
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+  const [showTrackingScriptModal, setShowTrackingScriptModal] = useState<Website | null>(null)
+  const [selectedWebsiteAnalytics, setSelectedWebsiteAnalytics] = useState<Website | null>(null)
+  const [copiedScript, setCopiedScript] = useState(false)
+  const [timeRange, setTimeRange] = useState('30d')
 
   // Load websites from database on mount
   useEffect(() => {
@@ -58,6 +92,11 @@ export default function WebsitesPage() {
           })) : []
 
           setWebsites(loadedWebsites)
+
+          // Fetch analytics after loading websites
+          if (loadedWebsites.length > 0) {
+            await fetchWebsiteAnalytics()
+          }
         }
       } catch (error) {
         console.error('Failed to load websites:', error)
@@ -67,6 +106,13 @@ export default function WebsitesPage() {
 
     loadWebsites()
   }, [user])
+
+  // Re-fetch analytics when websites array changes
+  useEffect(() => {
+    if (websites.length > 0 && hasLoadedFromDB) {
+      fetchWebsiteAnalytics()
+    }
+  }, [websites.length])
 
   const handleAddWebsite = () => {
     const newWebsite: Website = {
@@ -187,6 +233,262 @@ export default function WebsitesPage() {
     }
   }
 
+  // Analytics functions
+  const generateSiteId = (websiteName: string): string => {
+    return websiteName
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '') // Remove special chars except spaces and hyphens
+      .replace(/\s+/g, '-')          // Replace spaces with hyphens
+      .replace(/-+/g, '-')           // Replace multiple hyphens with single
+      .replace(/^-+|-+$/g, '')       // Remove leading/trailing hyphens
+      .substring(0, 50)              // Limit length
+      || 'unnamed-site'               // Fallback for empty names
+  }
+
+  const fetchWebsiteAnalytics = async () => {
+    if (websites.length === 0) return
+
+    setLoadingAnalytics(true)
+
+    try {
+      // Convert timeRange to days
+      const days = timeRange === '7d' ? 7 :
+                   timeRange === '30d' ? 30 :
+                   timeRange === '90d' ? 90 :
+                   timeRange === '1y' ? 365 : 30
+
+      const results = await Promise.allSettled(
+        websites.map(async (website) => {
+          const siteId = generateSiteId(website.name)
+
+          try {
+            const response = await fetch(`/api/analytics?siteId=${siteId}&days=${days}`)
+            if (!response.ok) {
+              console.warn(`Failed to fetch analytics for ${website.name}: ${response.status}`)
+              return { siteId, data: null, error: `HTTP ${response.status}` }
+            }
+
+            const data = await response.json()
+            return { siteId, data, error: null }
+          } catch (error) {
+            console.error(`Failed to fetch analytics for ${website.name}:`, error)
+            return { siteId, data: null, error: error instanceof Error ? error.message : String(error) }
+          }
+        })
+      )
+
+      const analyticsMap: Record<string, WebsiteAnalytics> = {}
+      const errors: string[] = []
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { siteId, data, error } = result.value
+          if (data && !error) {
+            analyticsMap[siteId] = data
+          } else if (error) {
+            errors.push(`${websites[index].name}: ${error}`)
+          }
+        } else {
+          errors.push(`${websites[index].name}: ${result.reason.message}`)
+        }
+      })
+
+      setWebsiteAnalytics(analyticsMap)
+
+      if (errors.length > 0 && Object.keys(analyticsMap).length === 0) {
+        console.error('All analytics requests failed:', errors)
+      } else if (errors.length > 0) {
+        console.warn('Some analytics requests failed:', errors)
+      }
+
+    } catch (error) {
+      console.error('Failed to fetch website analytics:', error)
+    } finally {
+      setLoadingAnalytics(false)
+    }
+  }
+
+  // Modal Components
+  const TrackingScriptModal = () => {
+    if (!showTrackingScriptModal) return null
+    const website = showTrackingScriptModal
+    const siteId = generateSiteId(website.name)
+
+    const trackingScript = `<!-- Website Analytics Tracking -->
+<script>
+  (function() {
+    var script = document.createElement('script');
+    script.src = '${typeof window !== 'undefined' ? window.location.origin : ''}/api/analytics/script?siteId=${siteId}';
+    script.async = true;
+    document.head.appendChild(script);
+  })();
+</script>`
+
+    const copyToClipboard = () => {
+      navigator.clipboard.writeText(trackingScript)
+      setCopiedScript(true)
+      setTimeout(() => setCopiedScript(false), 2000)
+    }
+
+    return (
+      <Dialog open={!!showTrackingScriptModal} onOpenChange={() => setShowTrackingScriptModal(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart className="h-5 w-5" />
+              Detailed Setup Instructions - {website.name}
+            </DialogTitle>
+            <DialogDescription>
+              Step-by-step guide to add analytics tracking to your website
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Script Code Block */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Tracking Script</label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={copyToClipboard}
+                >
+                  {copiedScript ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy Script
+                    </>
+                  )}
+                </Button>
+              </div>
+              <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
+                <code>{trackingScript}</code>
+              </pre>
+            </div>
+
+            {/* Instructions */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-semibold mb-2">💡 Installation Instructions</h4>
+              <ol className="space-y-2 text-sm">
+                <li className="flex gap-2">
+                  <span className="font-bold">1.</span>
+                  <span>Copy the tracking script above</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold">2.</span>
+                  <span>Add it to your website's HTML just before the closing <code className="bg-white px-1">&lt;/head&gt;</code> tag</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold">3.</span>
+                  <span>Deploy your changes to production</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold">4.</span>
+                  <span>Wait 5-10 minutes and refresh this page to see analytics data</span>
+                </li>
+              </ol>
+            </div>
+
+            {/* Site ID Reference */}
+            <div className="text-xs text-muted-foreground">
+              <p><strong>Site ID:</strong> <code className="bg-gray-100 px-1 py-0.5 rounded">{siteId}</code></p>
+              <p className="mt-1">This unique ID tracks analytics specifically for {website.name}</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  const WebsiteAnalyticsModal = () => {
+    if (!selectedWebsiteAnalytics) return null
+
+    const website = selectedWebsiteAnalytics
+    const siteId = generateSiteId(website.name)
+    const analytics = websiteAnalytics[siteId]
+
+    // Don't close modal during loading - show loading state instead
+    // if (!analytics) return null
+
+    return (
+      <Dialog
+        open={!!selectedWebsiteAnalytics}
+        onOpenChange={() => setSelectedWebsiteAnalytics(null)}
+      >
+        <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart className="h-5 w-5" />
+              {website.name} - Analytics Dashboard
+            </DialogTitle>
+            <DialogDescription className="flex items-center gap-2">
+              <ExternalLink className="h-3 w-3" />
+              <a
+                href={website.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                {website.url}
+              </a>
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Render existing analytics dashboard */}
+          <WebsiteAnalyticsDashboard
+            analytics={analytics || {
+              pageViews: 0,
+              uniqueVisitors: 0,
+              sessions: 0,
+              avgSessionDuration: 0,
+              bounceRate: 0,
+              eventsCount: 0,
+              topPages: [],
+              trafficSources: {},
+              geographicData: [],
+              percentageChanges: {},
+              recentPageViews: [],
+              recentEvents: [],
+              visitors: [],
+              lastUpdated: new Date().toISOString(),
+              hasEverBeenTracked: false
+            }}
+            siteId={siteId}
+            timeRange={timeRange}
+            onTimeRangeChange={setTimeRange}
+            onRefresh={async () => {
+              // Refresh just this website's analytics
+              const days = timeRange === '7d' ? 7 :
+                           timeRange === '30d' ? 30 :
+                           timeRange === '90d' ? 90 :
+                           timeRange === '1y' ? 365 : 30
+
+              try {
+                const response = await fetch(`/api/analytics?siteId=${siteId}&days=${days}`)
+                if (response.ok) {
+                  const data = await response.json()
+                  setWebsiteAnalytics(prev => ({
+                    ...prev,
+                    [siteId]: data
+                  }))
+                }
+              } catch (error) {
+                console.error('Failed to refresh analytics:', error)
+              }
+            }}
+            isRefreshing={loadingAnalytics}
+            isLoading={!analytics || loadingAnalytics}
+          />
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 lg:space-y-8">
@@ -198,6 +500,23 @@ export default function WebsitesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            onClick={fetchWebsiteAnalytics}
+            disabled={loadingAnalytics || websites.length === 0}
+          >
+            {loadingAnalytics ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              <>
+                <BarChart className="mr-2 h-4 w-4" />
+                Refresh Analytics
+              </>
+            )}
+          </Button>
           <Button onClick={handleAddWebsite}>
             <Plus className="mr-2 h-4 w-4" />
             Add Website
@@ -402,12 +721,136 @@ export default function WebsitesPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Analytics Section */}
+                  <div className="mt-4 pt-4 border-t">
+                    {(() => {
+                      const siteId = generateSiteId(website.name)
+                      const analytics = websiteAnalytics[siteId]
+
+                      return analytics && analytics.hasEverBeenTracked ? (
+                        // Show analytics preview if data exists
+                        <>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">📊 Analytics</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedWebsiteAnalytics(website)}
+                            >
+                              View Details →
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="text-center p-2 bg-blue-50 rounded">
+                              <p className="text-xs text-muted-foreground">Views</p>
+                              <p className="font-bold text-blue-600">
+                                {analytics.pageViews || 0}
+                              </p>
+                            </div>
+                            <div className="text-center p-2 bg-green-50 rounded">
+                              <p className="text-xs text-muted-foreground">Visitors</p>
+                              <p className="font-bold text-green-600">
+                                {analytics.uniqueVisitors || 0}
+                              </p>
+                            </div>
+                            <div className="text-center p-2 bg-purple-50 rounded">
+                              <p className="text-xs text-muted-foreground">Bounce</p>
+                              <p className="font-bold text-purple-600">
+                                {analytics.bounceRate || 0}%
+                              </p>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        // Show tracking script section if no analytics data
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-orange-600">
+                              <BarChart className="h-4 w-4 inline mr-1" />
+                              Analytics Setup Required
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setShowTrackingScriptModal(website)}
+                            >
+                              View Full Instructions →
+                            </Button>
+                          </div>
+
+                          {/* Auto-generated tracking script */}
+                          <div className="bg-gray-50 border rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-xs font-medium text-muted-foreground">
+                                Copy this script to your website:
+                              </label>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const siteId = generateSiteId(website.name)
+                                  const script = `<!-- Website Analytics Tracking -->
+<script>
+  (function() {
+    var script = document.createElement('script');
+    script.src = '${typeof window !== 'undefined' ? window.location.origin : ''}/api/analytics/script?siteId=${siteId}';
+    script.async = true;
+    document.head.appendChild(script);
+  })();
+</script>`
+                                  navigator.clipboard.writeText(script)
+                                  setCopiedScript(true)
+                                  setTimeout(() => setCopiedScript(false), 2000)
+                                }}
+                              >
+                                {copiedScript ? (
+                                  <>
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    Copied!
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3 mr-1" />
+                                    Copy
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                            <pre className="bg-gray-900 text-gray-100 p-2 rounded text-xs overflow-x-auto">
+                              <code>{`<!-- Website Analytics Tracking -->
+<script>
+  (function() {
+    var script = document.createElement('script');
+    script.src = '${typeof window !== 'undefined' ? window.location.origin : ''}/analytics.js';
+    script.setAttribute('data-site-id', '${generateSiteId(website.name)}');
+    script.async = true;
+    document.head.appendChild(script);
+  })();
+</script>`}</code>
+                            </pre>
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              Site ID: <code className="bg-white px-1 py-0.5 rounded text-xs">{generateSiteId(website.name)}</code>
+                            </div>
+                          </div>
+
+                          <div className="text-xs text-muted-foreground bg-blue-50 border border-blue-200 rounded p-2">
+                            💡 Add this script to your website's HTML just before the closing <code>&lt;/head&gt;</code> tag, then deploy to production.
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {/* Modals */}
+      <TrackingScriptModal />
+      <WebsiteAnalyticsModal />
     </div>
   )
 }

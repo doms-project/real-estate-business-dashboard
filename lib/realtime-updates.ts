@@ -40,7 +40,7 @@ export function initializeRealtimeUpdates() {
 
 // Subscribe to real-time updates for specific data types
 export function subscribeToUpdates(
-  dataType: 'health_scores' | 'alerts' | 'forecasts' | 'trends' | 'location_metrics' | 'activities' | 'workspaces' | 'workspace_requests' | 'blops',
+  dataType: 'health_scores' | 'alerts' | 'forecasts' | 'trends' | 'location_metrics' | 'activities' | 'workspaces' | 'workspace_requests' | 'blops' | 'businesses',
   callback: (data: any) => void
 ): () => void {
   if (!subscribers.has(dataType)) {
@@ -371,6 +371,65 @@ function setupRealtimeSubscriptions() {
       })
   } catch (error) {
     console.error('❌ Failed to set up workspaces real-time subscription:', error)
+  }
+
+  // Subscribe to businesses changes for real-time business updates
+  console.log('🏢 Setting up businesses real-time subscription...')
+
+  try {
+    supabaseAdminFallback
+      .channel('businesses_realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'businesses'
+      }, (payload) => {
+        console.log('🏢 New business created:', payload.new)
+        notifySubscribers('businesses', {
+          type: 'business_created',
+          data: payload.new,
+          timestamp: new Date().toISOString()
+        })
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'businesses'
+      }, (payload) => {
+        console.log('🏢 Business updated:', payload.new)
+        notifySubscribers('businesses', {
+          type: 'business_updated',
+          data: payload.new,
+          timestamp: new Date().toISOString()
+        })
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'businesses'
+      }, (payload) => {
+        console.log('🏢 Business deleted:', payload.old)
+        notifySubscribers('businesses', {
+          type: 'business_deleted',
+          data: payload.old,
+          timestamp: new Date().toISOString()
+        })
+      })
+      .subscribe((status, err) => {
+        console.log('🏢 Businesses subscription status:', status)
+        if (err) {
+          console.error('❌ Businesses subscription error:', err)
+        }
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Successfully subscribed to businesses real-time updates')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Businesses subscription failed - check Supabase RLS policies')
+        } else if (status === 'TIMED_OUT') {
+          console.error('❌ Businesses subscription timed out')
+        }
+      })
+  } catch (error) {
+    console.error('❌ Failed to set up businesses real-time subscription:', error)
   }
 
   // Subscribe to blops changes for real-time blop updates

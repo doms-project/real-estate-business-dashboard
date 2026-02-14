@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { createClient } from '@supabase/supabase-js'
 import {
   Eye,
   Users,
@@ -18,7 +19,8 @@ import {
   BarChart3,
   PieChart,
   Activity,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react'
 
 interface WebsiteAnalytics {
@@ -51,6 +53,9 @@ interface WebsiteAnalyticsDashboardProps {
   isRefreshing?: boolean
   autoRefresh?: boolean
   onToggleAutoRefresh?: () => void
+  timeRange?: string
+  onTimeRangeChange?: (range: string) => void
+  isLoading?: boolean
 }
 
 export function WebsiteAnalyticsDashboard({
@@ -59,9 +64,17 @@ export function WebsiteAnalyticsDashboard({
   onRefresh,
   isRefreshing = false,
   autoRefresh = true,
-  onToggleAutoRefresh
+  onToggleAutoRefresh,
+  timeRange = '30d',
+  onTimeRangeChange,
+  isLoading = false
 }: WebsiteAnalyticsDashboardProps) {
-  const [timeRange, setTimeRange] = useState('30d')
+
+  // Initialize Supabase client for real-time updates
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   // Log when analytics data updates
   useEffect(() => {
@@ -72,6 +85,75 @@ export function WebsiteAnalyticsDashboard({
       lastUpdated: analytics.lastUpdated
     });
   }, [analytics.pageViews, analytics.sessions, analytics.lastUpdated, siteId]);
+
+  // Real-time analytics updates with debouncing
+  useEffect(() => {
+    if (!siteId || !onRefresh) return;
+
+    console.log('🔄 Setting up real-time analytics for site:', siteId);
+
+    let debounceTimer: NodeJS.Timeout;
+
+    const debouncedRefresh = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log('🔄 Refreshing analytics after debounce...');
+        onRefresh();
+      }, 5000); // Wait 5 seconds after last event before refreshing
+    };
+
+    const channel = supabase
+      .channel(`analytics-${siteId}`)
+      .on('postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'page_views',
+          filter: `site_id=eq.${siteId}`
+        },
+        (payload) => {
+          console.log('📈 New page view detected');
+          debouncedRefresh();
+        }
+      )
+      .on('postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'visitor_events',
+          filter: `site_id=eq.${siteId}`
+        },
+        (payload) => {
+          console.log('🎯 New event detected');
+          debouncedRefresh();
+        }
+      )
+      .on('postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'website_visitors',
+          filter: `site_id=eq.${siteId}`
+        },
+        (payload) => {
+          console.log('👤 New visitor detected');
+          debouncedRefresh();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Real-time analytics subscription active for:', siteId);
+        } else if (status === 'CLOSED') {
+          console.log('❌ Real-time analytics subscription closed');
+        }
+      });
+
+    return () => {
+      console.log('🔌 Cleaning up real-time analytics subscription');
+      clearTimeout(debounceTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [siteId, onRefresh]);
 
   // Calculate derived metrics
   const metrics = useMemo(() => {
@@ -103,28 +185,42 @@ export function WebsiteAnalyticsDashboard({
 
   // Calculate device/browser breakdown from page views (more accurate)
   const deviceBreakdown = useMemo(() => {
-    const devices = analytics.recentPageViews?.reduce((acc, pageView) => {
-      const device = pageView.device_type || 'unknown'
-      acc[device] = (acc[device] || 0) + 1
-      return acc
-    }, {} as Record<string, number>) || {}
+    // Count unique sessions per device/browser
+    const sessionDevices = new Map<string, string>()
+    const sessionBrowsers = new Map<string, string>()
 
-    const browsers = analytics.recentPageViews?.reduce((acc, pageView) => {
-      const browser = pageView.browser || 'unknown'
-      acc[browser] = (acc[browser] || 0) + 1
-      return acc
-    }, {} as Record<string, number>) || {}
+    // Use page views to get most recent device/browser per session
+    analytics.recentPageViews?.forEach(pageView => {
+      if (!sessionDevices.has(pageView.session_id)) {
+        sessionDevices.set(pageView.session_id, pageView.device_type || 'unknown')
+      }
+      if (!sessionBrowsers.has(pageView.session_id)) {
+        sessionBrowsers.set(pageView.session_id, pageView.browser || 'unknown')
+      }
+    })
+
+    // Count sessions per device
+    const devices: Record<string, number> = {}
+    sessionDevices.forEach(device => {
+      devices[device] = (devices[device] || 0) + 1
+    })
+
+    // Count sessions per browser
+    const browsers: Record<string, number> = {}
+    sessionBrowsers.forEach(browser => {
+      browsers[browser] = (browsers[browser] || 0) + 1
+    })
 
     // Fallback to visitor data if no page view data
-    if (Object.keys(devices).length === 0) {
-      analytics.visitors?.forEach(visitor => {
+    if (Object.keys(devices).length === 0 && analytics.visitors?.length) {
+      analytics.visitors.forEach(visitor => {
         const device = visitor.device_type || 'unknown'
         devices[device] = (devices[device] || 0) + 1
       })
     }
 
-    if (Object.keys(browsers).length === 0) {
-      analytics.visitors?.forEach(visitor => {
+    if (Object.keys(browsers).length === 0 && analytics.visitors?.length) {
+      analytics.visitors.forEach(visitor => {
         const browser = visitor.browser || 'unknown'
         browsers[browser] = (browsers[browser] || 0) + 1
       })
@@ -145,12 +241,17 @@ export function WebsiteAnalyticsDashboard({
     return num.toString()
   }
 
-  const formatPercentageChange = (change: number | null) => {
+  const formatPercentageChange = (change: number | null, isInverseMetric = false) => {
     if (change === null) return null
-    const isPositive = change >= 0
-    const colorClass = isPositive ? 'text-green-600' : 'text-red-600'
-    const icon = isPositive ? '↗️' : '↘️'
-    return { value: change, colorClass, icon }
+
+    // For inverse metrics (bounce rate), negative change is good
+    // For normal metrics (page views), positive change is good
+    const isImprovement = isInverseMetric ? change < 0 : change >= 0
+
+    const colorClass = isImprovement ? 'text-green-600' : 'text-red-600'
+    const icon = change >= 0 ? '↗️' : '↘️'
+
+    return { value: change, colorClass, icon, isImprovement }
   }
 
   const getDeviceIcon = (device: string) => {
@@ -211,7 +312,46 @@ export function WebsiteAnalyticsDashboard({
             </Button>
           )}
 
-          <Select value={timeRange} onValueChange={setTimeRange}>
+          {/* Export CSV button */}
+          <Button
+            onClick={() => {
+              const csvData = [
+                ['Metric', 'Value'],
+                ['Page Views', analytics.pageViews],
+                ['Unique Visitors', analytics.uniqueVisitors],
+                ['Sessions', analytics.sessions],
+                ['Bounce Rate', `${analytics.bounceRate}%`],
+                ['Avg Session Duration', `${Math.floor(analytics.avgSessionDuration / 60)}m ${analytics.avgSessionDuration % 60}s`],
+                ['Events Count', analytics.eventsCount],
+                [''],
+                ['Top Pages', 'Views'],
+                ...analytics.topPages.map(p => [p.page, p.views]),
+                [''],
+                ['Traffic Sources', 'Count'],
+                ...Object.entries(analytics.trafficSources).map(([source, count]) => [source, count]),
+                [''],
+                ['Geographic Data', 'Visitors'],
+                ...(analytics.geographicData || []).map(g => [g.country, g.visitors])
+              ]
+
+              const csv = csvData.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
+              const blob = new Blob([csv], { type: 'text/csv' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `analytics-${siteId}-${new Date().toISOString().split('T')[0]}.csv`
+              a.click()
+              URL.revokeObjectURL(url)
+            }}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-1"
+          >
+            <Download className="h-3 w-3" />
+            Export CSV
+          </Button>
+
+          <Select value={timeRange} onValueChange={(value) => onTimeRangeChange?.(value)}>
             <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
@@ -232,12 +372,18 @@ export function WebsiteAnalyticsDashboard({
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Page Views</p>
-                <p className="text-2xl font-bold">{formatNumber(analytics.pageViews)}</p>
+                {isLoading ? (
+                  <div className="h-8 w-20 bg-gray-200 animate-pulse rounded mt-1" />
+                ) : (
+                  <p className="text-2xl font-bold">{formatNumber(analytics.pageViews)}</p>
+                )}
               </div>
               <Eye className="h-8 w-8 text-blue-500" />
             </div>
             <div className="flex items-center mt-2">
-              {(() => {
+              {isLoading ? (
+                <div className="h-4 w-16 bg-gray-200 animate-pulse rounded" />
+              ) : (() => {
                 const change = analytics.percentageChanges?.pageViews !== undefined ?
                   formatPercentageChange(analytics.percentageChanges.pageViews) : null
                 return change ? (
@@ -329,10 +475,10 @@ export function WebsiteAnalyticsDashboard({
             <div className="flex items-center mt-2">
               {(() => {
                 const change = analytics.percentageChanges?.bounceRate !== undefined ?
-                  formatPercentageChange(analytics.percentageChanges.bounceRate) : null
+                  formatPercentageChange(analytics.percentageChanges.bounceRate, true) : null
                 return change ? (
                   <>
-                    <span className={`text-xs mr-1 ${change.icon === '↗️' ? 'text-green-500' : 'text-red-500'}`}>
+                    <span className={`text-xs mr-1 ${change.isImprovement ? 'text-green-500' : 'text-red-500'}`}>
                       {change.icon}
                     </span>
                     <span className={`text-xs ${change.colorClass}`}>
