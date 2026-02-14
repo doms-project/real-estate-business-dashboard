@@ -408,26 +408,28 @@ export async function GET(request: NextRequest) {
 
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 
-    // Get page views within date range
+    // Get page views within date range (limited for performance)
     const { data: pageViews, error: pvError } = await supabase
       .from('page_views')
-      .select('*')
+      .select('session_id, page_url, page_title, viewed_at, device_type, browser, utm_source, referrer')
       .eq('site_id', siteId)
       .gte('viewed_at', startDate)
       .order('viewed_at', { ascending: false })
+      .limit(100)
 
     if (pvError) {
       console.error(`❌ Analytics GET: Database error fetching page views:`, pvError)
       throw pvError
     }
 
-    // Get visitor events within date range
+    // Get visitor events within date range (limited for performance)
     const { data: events, error: eError } = await supabase
       .from('visitor_events')
       .select('*')
       .eq('site_id', siteId)
       .gte('occurred_at', startDate)
       .order('occurred_at', { ascending: false })
+      .limit(100)
 
     if (eError) throw eError
 
@@ -452,7 +454,6 @@ export async function GET(request: NextRequest) {
 
     if (pageViews && pageViews.length > 0) {
       console.log(`📊 Sample page views:`, pageViews.slice(0, 3).map(pv => ({
-        id: pv.id,
         session_id: pv.session_id,
         page_url: pv.page_url,
         viewed_at: pv.viewed_at

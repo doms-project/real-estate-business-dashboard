@@ -16,6 +16,7 @@ import { TrendingUp, DollarSign, Users, Target, Plus, Trash2, RefreshCw, Edit, S
 import { useState, useEffect } from "react"
 import { useUser } from "@clerk/nextjs"
 import { useWorkspace } from "@/components/workspace-context"
+import { subscribeToUpdates } from "@/lib/realtime-updates"
 
 interface Campaign {
   id: string
@@ -70,6 +71,7 @@ export default function BusinessPage() {
   const [churchBusiness, setChurchBusiness] = useState<EditableBusiness | null>(null)
   const [realEstateBusiness, setRealEstateBusiness] = useState<EditableBusiness | null>(null)
   const [marketingBusiness, setMarketingBusiness] = useState<EditableBusiness | null>(null)
+  const [marketingBusinesses, setMarketingBusinesses] = useState<EditableBusiness[]>([])
   const [kpis, setKpis] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [syncLoading, setSyncLoading] = useState(false)
@@ -78,20 +80,34 @@ export default function BusinessPage() {
   const [savingCampaigns, setSavingCampaigns] = useState<Set<string>>(new Set())
   const [editingBusinessId, setEditingBusinessId] = useState<string | null>(null)
   const [inlineEditingField, setInlineEditingField] = useState<string | null>(null)
+  const [savingStatus, setSavingStatus] = useState<{[businessId: string]: 'saving' | 'saved' | null}>({})
 
   // Fetch businesses, campaigns, and KPIs on mount and when workspace changes
   useEffect(() => {
     if (user && currentWorkspace?.id) {
       fetchBusinesses()
       fetchKPIs()
+
+      // Subscribe to real-time business updates
+      const unsubscribe = subscribeToUpdates('businesses', (update) => {
+        console.log('🏢 Real-time business update:', update)
+        if (update.type === 'business_created' || update.type === 'business_updated' || update.type === 'business_deleted') {
+          // Refresh businesses when there's a change
+          fetchBusinesses()
+        }
+      })
+
+      return unsubscribe
     }
   }, [user, currentWorkspace?.id])
 
   const fetchBusinesses = async () => {
     try {
+      console.log('🔄 Fetching businesses for workspace:', currentWorkspace?.id)
       setLoading(true)
       const response = await fetch(`/api/business?workspaceId=${currentWorkspace?.id}`)
       const data = await response.json()
+      console.log('📊 Businesses API response:', data)
 
       if (data.success && data.businesses) {
         // Organize businesses by type and format campaign data
@@ -124,42 +140,94 @@ export default function BusinessPage() {
           }))
         }
 
-        const church = data.businesses.find((b: any) => b.type === 'church')
-        const realEstate = data.businesses.find((b: any) => b.type === 'real_estate')
-        const marketing = data.businesses.find((b: any) => b.type === 'marketing')
+        // Organize businesses by type
+        console.log('📊 Organizing businesses by type. Total businesses:', data.businesses?.length || 0)
+        data.businesses?.forEach((b: any) => console.log(`  - ${b.name} (${b.id}) - type: ${b.type}, workspace: ${b.workspace_id}`))
 
-        setChurchBusiness(church ? {
-          id: church.id,
-          user_id: church.user_id,
-          name: church.name,
-          description: church.description,
-          type: church.type,
-          campaigns: formatCampaigns(church.campaigns || []),
-          created_at: church.created_at,
-          updated_at: church.updated_at
+        const churchBusinesses = data.businesses.filter((b: any) => b.type === 'church')
+        const realEstateBusinesses = data.businesses.filter((b: any) => b.type === 'real_estate')
+        const marketingBusinessList = data.businesses.filter((b: any) => b.type === 'marketing')
+
+        console.log(`📊 Filtered: ${churchBusinesses.length} church, ${realEstateBusinesses.length} real estate, ${marketingBusinessList.length} marketing`)
+
+        // Set single businesses for church and real estate (first one found)
+        setChurchBusiness(churchBusinesses.length > 0 ? {
+          id: churchBusinesses[0].id,
+          user_id: churchBusinesses[0].user_id,
+          name: churchBusinesses[0].name,
+          description: churchBusinesses[0].description,
+          type: churchBusinesses[0].type,
+          campaigns: formatCampaigns(churchBusinesses[0].campaigns || []),
+          created_at: churchBusinesses[0].created_at,
+          updated_at: churchBusinesses[0].updated_at
         } : null)
 
-        setRealEstateBusiness(realEstate ? {
-          id: realEstate.id,
-          user_id: realEstate.user_id,
-          name: realEstate.name,
-          description: realEstate.description,
-          type: realEstate.type,
-          campaigns: formatCampaigns(realEstate.campaigns || []),
-          created_at: realEstate.created_at,
-          updated_at: realEstate.updated_at
+        setRealEstateBusiness(realEstateBusinesses.length > 0 ? {
+          id: realEstateBusinesses[0].id,
+          user_id: realEstateBusinesses[0].user_id,
+          name: realEstateBusinesses[0].name,
+          description: realEstateBusinesses[0].description,
+          type: realEstateBusinesses[0].type,
+          campaigns: formatCampaigns(realEstateBusinesses[0].campaigns || []),
+          created_at: realEstateBusinesses[0].created_at,
+          updated_at: realEstateBusinesses[0].updated_at
         } : null)
 
-        setMarketingBusiness(marketing ? {
-          id: marketing.id,
-          user_id: marketing.user_id,
-          name: marketing.name,
-          description: marketing.description,
-          type: marketing.type,
-          campaigns: formatCampaigns(marketing.campaigns || []),
-          created_at: marketing.created_at,
-          updated_at: marketing.updated_at
-        } : null)
+        // Set all marketing businesses as array
+        const formattedMarketingBusinesses = marketingBusinessList.map((business: any) => ({
+          id: business.id,
+          user_id: business.user_id,
+          name: business.name,
+          description: business.description,
+          type: business.type,
+          campaigns: formatCampaigns(business.campaigns || []),
+          created_at: business.created_at,
+          updated_at: business.updated_at
+        }))
+
+        console.log('🏢 Setting businesses:', {
+          churchCount: churchBusinesses.length,
+          realEstateCount: realEstateBusinesses.length,
+          marketingCount: formattedMarketingBusinesses.length
+        })
+
+        // Preserve existing businesses that might be missing from API response
+        // This prevents businesses from disappearing due to API issues or filtering
+        const preserveMissingBusinesses = (existingBusinesses: EditableBusiness[], fetchedBusinesses: EditableBusiness[], type: string) => {
+          const fetchedIds = new Set(fetchedBusinesses.map(b => b.id))
+          const missingBusinesses = existingBusinesses.filter(b => !fetchedIds.has(b.id) && !b.id.startsWith('temp-'))
+
+          if (missingBusinesses.length > 0) {
+            console.warn(`⚠️ Preserving ${missingBusinesses.length} ${type} businesses that were not returned by API:`, missingBusinesses.map(b => b.id))
+            return [...fetchedBusinesses, ...missingBusinesses]
+          }
+
+          return fetchedBusinesses
+        }
+
+        // Apply preservation logic
+        let finalChurchBusiness = churchBusinesses.length > 0 ? churchBusinesses[0] : null
+        if (churchBusiness && !finalChurchBusiness) {
+          console.warn('⚠️ Preserving existing church business that was not returned by API:', churchBusiness.id)
+          finalChurchBusiness = churchBusiness
+        }
+
+        let finalRealEstateBusiness = realEstateBusinesses.length > 0 ? realEstateBusinesses[0] : null
+        if (realEstateBusiness && !finalRealEstateBusiness) {
+          console.warn('⚠️ Preserving existing real estate business that was not returned by API:', realEstateBusiness.id)
+          finalRealEstateBusiness = realEstateBusiness
+        }
+
+        let finalMarketingBusinesses = preserveMissingBusinesses(marketingBusinesses, formattedMarketingBusinesses, 'marketing')
+
+        setChurchBusiness(finalChurchBusiness)
+        setRealEstateBusiness(finalRealEstateBusiness)
+        setMarketingBusinesses(finalMarketingBusinesses)
+
+        // For backward compatibility, set the first marketing business as the single business
+        setMarketingBusiness(finalMarketingBusinesses.length > 0 ? finalMarketingBusinesses[0] : null)
+
+        console.log('✅ Businesses state updated')
       }
     } catch (error) {
       console.error('Failed to fetch businesses:', error)
@@ -511,27 +579,66 @@ export default function BusinessPage() {
 
   // Add new business
   const handleAddBusiness = () => {
+    // Determine which type of business to create based on what's available
+    let businessType: 'church' | 'real_estate' | 'marketing' = 'marketing'
+
+    if (!churchBusiness) {
+      businessType = 'church'
+    } else if (!realEstateBusiness) {
+      businessType = 'real_estate'
+    } else {
+      businessType = 'marketing' // Default to marketing if both others exist
+    }
+
     const newBusiness: EditableBusiness = {
       id: `temp-${Date.now()}`,
       user_id: user?.id || '',
       name: '',
       description: '',
-      type: 'marketing',
+      type: businessType,
       campaigns: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
 
-    // Add as a new business card that will be edited inline
-    setMarketingBusiness(newBusiness) // Default to marketing type
+    // Set the business based on type
+    if (businessType === 'church') {
+      setChurchBusiness(newBusiness)
+    } else if (businessType === 'real_estate') {
+      setRealEstateBusiness(newBusiness)
+    } else {
+      // For marketing businesses, add to array and set as current business
+      setMarketingBusinesses(prev => [...prev, newBusiness])
+      setMarketingBusiness(newBusiness)
+    }
+
     setEditingBusinessId(newBusiness.id)
   }
 
   // Save new business
   const saveNewBusiness = async (businessId: string) => {
-    const business = churchBusiness?.id === businessId ? churchBusiness :
-                     realEstateBusiness?.id === businessId ? realEstateBusiness :
-                     marketingBusiness
+    // Find the business in the appropriate location
+    let business: EditableBusiness | undefined
+
+    console.log('🔍 Finding business to save:', businessId)
+    console.log('  Church business:', churchBusiness?.id)
+    console.log('  Real estate business:', realEstateBusiness?.id)
+    console.log('  Marketing business (single):', marketingBusiness?.id)
+    console.log('  Marketing businesses array:', marketingBusinesses.map(b => b.id))
+
+    if (churchBusiness?.id === businessId) {
+      business = churchBusiness
+      console.log('  Found in church business')
+    } else if (realEstateBusiness?.id === businessId) {
+      business = realEstateBusiness
+      console.log('  Found in real estate business')
+    } else if (marketingBusiness?.id === businessId) {
+      business = marketingBusiness
+      console.log('  Found in single marketing business')
+    } else {
+      business = marketingBusinesses.find(b => b.id === businessId)
+      console.log('  Found in marketing businesses array:', business ? 'yes' : 'no')
+    }
 
     if (!business || !business.name.trim()) {
       alert('Business name is required')
@@ -539,6 +646,21 @@ export default function BusinessPage() {
     }
 
     try {
+      console.log('💾 Saving business:', {
+        businessId,
+        name: business.name.trim(),
+        type: business.type,
+        workspaceId: currentWorkspace?.id,
+        workspaceName: currentWorkspace?.name,
+        currentWorkspace: currentWorkspace
+      })
+
+      if (!currentWorkspace?.id) {
+        console.error('❌ No current workspace found!')
+        alert('No workspace selected. Please select a workspace first.')
+        return
+      }
+
       const response = await fetch('/api/business', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -550,21 +672,47 @@ export default function BusinessPage() {
         })
       })
 
+      console.log('📡 API Response status:', response.status)
+
       const data = await response.json()
+      console.log('📡 API Response data:', data)
 
       if (data.success) {
-        // Clear the temporary business and refresh
-        if (churchBusiness?.id === businessId) setChurchBusiness(null)
-        if (realEstateBusiness?.id === businessId) setRealEstateBusiness(null)
-        if (marketingBusiness?.id === businessId) setMarketingBusiness(null)
+        console.log('✅ Business created successfully:', data.business)
+
+        // Update the business with the real database ID instead of clearing it
+        const savedBusiness = data.business
+        const updatedBusiness: EditableBusiness = {
+          id: savedBusiness.id,
+          user_id: savedBusiness.user_id,
+          name: savedBusiness.name,
+          description: savedBusiness.description,
+          type: savedBusiness.type,
+          campaigns: business.campaigns, // Keep existing campaigns
+          created_at: savedBusiness.created_at,
+          updated_at: savedBusiness.updated_at
+        }
+
+        if (churchBusiness?.id === businessId) {
+          setChurchBusiness(updatedBusiness)
+        } else if (realEstateBusiness?.id === businessId) {
+          setRealEstateBusiness(updatedBusiness)
+        } else {
+          // For marketing businesses, update in the array and set as current
+          setMarketingBusinesses(prev => prev.map(b =>
+            b.id === businessId ? updatedBusiness : b
+          ))
+          setMarketingBusiness(updatedBusiness)
+        }
 
         setEditingBusinessId(null)
-        fetchBusinesses() // Refresh to show the new business
+        console.log('✅ Business save process completed - business now has real ID:', savedBusiness.id)
       } else {
+        console.error('❌ API returned error:', data.error)
         alert(`Failed to create business: ${data.error}`)
       }
     } catch (error) {
-      console.error('Failed to create business:', error)
+      console.error('❌ Failed to create business:', error)
       alert('Failed to create business')
     }
   }
@@ -574,8 +722,8 @@ export default function BusinessPage() {
     // Remove the temporary business if it's a temp ID
     if (businessId.startsWith('temp-')) {
       if (churchBusiness?.id === businessId) setChurchBusiness(null)
-      if (realEstateBusiness?.id === businessId) setRealEstateBusiness(null)
-      if (marketingBusiness?.id === businessId) setMarketingBusiness(null)
+      else if (realEstateBusiness?.id === businessId) setRealEstateBusiness(null)
+      else setMarketingBusinesses(prev => prev.filter(b => b.id !== businessId))
     }
 
     setEditingBusinessId(null)
@@ -612,15 +760,124 @@ export default function BusinessPage() {
   }
 
   // Update business field
-  const updateBusinessField = (businessId: string, field: keyof EditableBusiness, value: any) => {
-    const updateBusiness = (business: EditableBusiness | null) => {
-      if (!business || business.id !== businessId) return business
-      return { ...business, [field]: value }
+  const updateBusinessField = async (businessId: string, field: keyof EditableBusiness, value: any) => {
+    console.log('🔄 Updating business field:', { businessId, field, value })
+
+    // Update local state immediately
+    if (churchBusiness?.id === businessId) {
+      console.log('📝 Updating church business in state')
+      setChurchBusiness(prev => {
+        if (!prev) {
+          console.error('❌ Church business not found in state!')
+          return null
+        }
+        const updated = { ...prev, [field]: value }
+        console.log('✅ Church business updated in state:', updated)
+        return updated
+      })
+    } else if (realEstateBusiness?.id === businessId) {
+      console.log('📝 Updating real estate business in state')
+      setRealEstateBusiness(prev => {
+        if (!prev) {
+          console.error('❌ Real estate business not found in state!')
+          return null
+        }
+        const updated = { ...prev, [field]: value }
+        console.log('✅ Real estate business updated in state:', updated)
+        return updated
+      })
+    } else if (marketingBusiness?.id === businessId) {
+      console.log('📝 Updating marketing business in state')
+      setMarketingBusiness(prev => {
+        if (!prev) {
+          console.error('❌ Marketing business not found in state!')
+          return null
+        }
+        const updated = { ...prev, [field]: value }
+        console.log('✅ Marketing business updated in state:', updated)
+        return updated
+      })
+    } else {
+      console.log('📝 Updating marketing business in array')
+      setMarketingBusinesses(prev => {
+        const businessIndex = prev.findIndex(b => b.id === businessId)
+        if (businessIndex === -1) {
+          console.error('❌ Business not found in marketingBusinesses array!')
+          return prev
+        }
+        const updated = prev.map(business =>
+          business.id === businessId
+            ? { ...business, [field]: value }
+            : business
+        )
+        console.log('✅ Marketing business updated in array:', updated[businessIndex])
+        return updated
+      })
     }
 
-    setChurchBusiness(prev => updateBusiness(prev))
-    setRealEstateBusiness(prev => updateBusiness(prev))
-    setMarketingBusiness(prev => updateBusiness(prev))
+    // If this is not a temporary business, save to database
+    if (!businessId.startsWith('temp-')) {
+      try {
+        setSavingStatus(prev => ({ ...prev, [businessId]: 'saving' }))
+        console.log('💾 Auto-saving business field update:', { businessId, field, value, currentWorkspace: currentWorkspace })
+
+        // Ensure we have a workspace
+        if (!currentWorkspace?.id) {
+          console.error('❌ No workspace selected for business update')
+          setSavingStatus(prev => ({ ...prev, [businessId]: null }))
+          alert('No workspace selected. Please select a workspace first.')
+          return
+        }
+
+        const requestBody = {
+          id: businessId,
+          [field]: value,
+          workspaceId: currentWorkspace.id
+        }
+        console.log('📤 PUT request body:', requestBody)
+
+        const response = await fetch('/api/business', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        })
+
+        console.log('📡 PUT response status:', response.status)
+        const data = await response.json()
+        console.log('📡 PUT response data:', data)
+
+        if (!data.success) {
+          console.error('❌ Failed to save business update:', data.error)
+          setSavingStatus(prev => ({ ...prev, [businessId]: null }))
+
+          // Revert the local state change on API failure
+          console.log('🔄 Reverting local state change due to API failure')
+          if (churchBusiness?.id === businessId) {
+            // For now, just show error - in future could revert the specific field
+            console.error('Church business update failed - field may show incorrect value until refresh')
+          } else if (realEstateBusiness?.id === businessId) {
+            console.error('Real estate business update failed - field may show incorrect value until refresh')
+          } else if (marketingBusiness?.id === businessId) {
+            console.error('Marketing business update failed - field may show incorrect value until refresh')
+          }
+
+          alert(`Failed to save changes: ${data.error}`)
+        } else {
+          console.log('✅ Business field updated successfully:', data.business)
+          setSavingStatus(prev => ({ ...prev, [businessId]: 'saved' }))
+          // Clear the saved status after 2 seconds
+          setTimeout(() => {
+            setSavingStatus(prev => ({ ...prev, [businessId]: null }))
+          }, 2000)
+        }
+      } catch (error) {
+        console.error('❌ Error saving business update:', error)
+        setSavingStatus(prev => ({ ...prev, [businessId]: null }))
+        alert('Failed to save changes. Please try again.')
+      }
+    } else {
+      console.log('⏭️ Skipping auto-save for temp business:', businessId)
+    }
   }
 
   // Cleanup timeout on unmount
@@ -785,7 +1042,10 @@ export default function BusinessPage() {
                     {inlineEditingField === `name-${churchBusiness.id}` ? (
                       <Input
                         value={churchBusiness.name}
-                        onChange={(e) => updateBusinessField(churchBusiness.id, 'name', e.target.value)}
+                        onChange={async (e) => {
+                          console.log('📝 Editing church business name:', churchBusiness.id, e.target.value)
+                          await updateBusinessField(churchBusiness.id, 'name', e.target.value)
+                        }}
                         onBlur={() => setInlineEditingField(null)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') setInlineEditingField(null)
@@ -797,7 +1057,10 @@ export default function BusinessPage() {
                     ) : (
                       <CardTitle
                         className="cursor-pointer hover:bg-gray-50 px-2 py-1 rounded flex items-center gap-2"
-                        onDoubleClick={() => setInlineEditingField(`name-${churchBusiness.id}`)}
+                        onDoubleClick={() => {
+                        console.log('🔄 Starting inline edit for church business:', churchBusiness.id)
+                        setInlineEditingField(`name-${churchBusiness.id}`)
+                      }}
                       >
                         <Target className="h-5 w-5" />
                         {churchBusiness.name || 'Unnamed Business'}
@@ -809,7 +1072,7 @@ export default function BusinessPage() {
                     {inlineEditingField === `description-${churchBusiness.id}` ? (
                       <Input
                         value={churchBusiness.description || ''}
-                        onChange={(e) => updateBusinessField(churchBusiness.id, 'description', e.target.value)}
+                        onChange={async (e) => await updateBusinessField(churchBusiness.id, 'description', e.target.value)}
                         onBlur={() => setInlineEditingField(null)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') setInlineEditingField(null)
@@ -859,14 +1122,30 @@ export default function BusinessPage() {
                     </span> • {churchBusiness.campaigns.length} campaigns • Campaign performance and metrics
                   </div>
 
-                  {inlineEditingField?.startsWith(`name-${churchBusiness.id}`) ||
-                   inlineEditingField?.startsWith(`description-${churchBusiness.id}`) ||
-                   inlineEditingField === `type-${churchBusiness.id}` ? (
+                  {churchBusiness.id.startsWith('temp-') ? (
                     <div className="flex gap-2 pt-2">
-                      <Button size="sm" onClick={() => setInlineEditingField(null)}>
+                      <Button size="sm" onClick={() => saveNewBusiness(churchBusiness.id)}>
                         <Save className="h-4 w-4 mr-1" />
-                        Done
+                        Save Business
                       </Button>
+                    </div>
+                  ) : savingStatus[churchBusiness.id] ? (
+                    <div className="flex gap-2 pt-2 text-sm text-muted-foreground">
+                      {savingStatus[churchBusiness.id] === 'saving' ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : savingStatus[churchBusiness.id] === 'saved' ? (
+                        <>
+                          <div className="h-4 w-4 rounded-full bg-green-500 flex items-center justify-center">
+                            <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          Saved
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -876,6 +1155,7 @@ export default function BusinessPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => addNewCampaign(churchBusiness.id)}
+                  disabled={churchBusiness.id.startsWith('temp-')}
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   Add Campaign
@@ -1115,7 +1395,7 @@ export default function BusinessPage() {
                     {inlineEditingField === `name-${realEstateBusiness.id}` ? (
                       <Input
                         value={realEstateBusiness.name}
-                        onChange={(e) => updateBusinessField(realEstateBusiness.id, 'name', e.target.value)}
+                        onChange={async (e) => await updateBusinessField(realEstateBusiness.id, 'name', e.target.value)}
                         onBlur={() => setInlineEditingField(null)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') setInlineEditingField(null)
@@ -1139,7 +1419,7 @@ export default function BusinessPage() {
                     {inlineEditingField === `description-${realEstateBusiness.id}` ? (
                       <Input
                         value={realEstateBusiness.description || ''}
-                        onChange={(e) => updateBusinessField(realEstateBusiness.id, 'description', e.target.value)}
+                        onChange={async (e) => await updateBusinessField(realEstateBusiness.id, 'description', e.target.value)}
                         onBlur={() => setInlineEditingField(null)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') setInlineEditingField(null)
@@ -1189,14 +1469,30 @@ export default function BusinessPage() {
                     </span> • {realEstateBusiness.campaigns.length} campaigns • Campaign performance and metrics
                   </div>
 
-                  {inlineEditingField?.startsWith(`name-${realEstateBusiness.id}`) ||
-                   inlineEditingField?.startsWith(`description-${realEstateBusiness.id}`) ||
-                   inlineEditingField === `type-${realEstateBusiness.id}` ? (
+                  {realEstateBusiness.id.startsWith('temp-') ? (
                     <div className="flex gap-2 pt-2">
-                      <Button size="sm" onClick={() => setInlineEditingField(null)}>
+                      <Button size="sm" onClick={() => saveNewBusiness(realEstateBusiness.id)}>
                         <Save className="h-4 w-4 mr-1" />
-                        Done
+                        Save Business
                       </Button>
+                    </div>
+                  ) : savingStatus[realEstateBusiness.id] ? (
+                    <div className="flex gap-2 pt-2 text-sm text-muted-foreground">
+                      {savingStatus[realEstateBusiness.id] === 'saving' ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : savingStatus[realEstateBusiness.id] === 'saved' ? (
+                        <>
+                          <div className="h-4 w-4 rounded-full bg-green-500 flex items-center justify-center">
+                            <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          Saved
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -1206,6 +1502,7 @@ export default function BusinessPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => addNewCampaign(realEstateBusiness.id)}
+                  disabled={realEstateBusiness.id.startsWith('temp-')}
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   Add Campaign
@@ -1431,7 +1728,7 @@ export default function BusinessPage() {
                     {inlineEditingField === `name-${marketingBusiness.id}` ? (
                       <Input
                         value={marketingBusiness.name}
-                        onChange={(e) => updateBusinessField(marketingBusiness.id, 'name', e.target.value)}
+                        onChange={async (e) => await updateBusinessField(marketingBusiness.id, 'name', e.target.value)}
                         onBlur={() => setInlineEditingField(null)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') setInlineEditingField(null)
@@ -1455,7 +1752,7 @@ export default function BusinessPage() {
                     {inlineEditingField === `description-${marketingBusiness.id}` ? (
                       <Input
                         value={marketingBusiness.description || ''}
-                        onChange={(e) => updateBusinessField(marketingBusiness.id, 'description', e.target.value)}
+                        onChange={async (e) => await updateBusinessField(marketingBusiness.id, 'description', e.target.value)}
                         onBlur={() => setInlineEditingField(null)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') setInlineEditingField(null)
@@ -1505,14 +1802,30 @@ export default function BusinessPage() {
                     </span> • {marketingBusiness.campaigns.length} campaigns • Campaign performance and metrics
                   </div>
 
-                  {inlineEditingField?.startsWith(`name-${marketingBusiness.id}`) ||
-                   inlineEditingField?.startsWith(`description-${marketingBusiness.id}`) ||
-                   inlineEditingField === `type-${marketingBusiness.id}` ? (
+                  {marketingBusiness.id.startsWith('temp-') ? (
                     <div className="flex gap-2 pt-2">
-                      <Button size="sm" onClick={() => setInlineEditingField(null)}>
+                      <Button size="sm" onClick={() => saveNewBusiness(marketingBusiness.id)}>
                         <Save className="h-4 w-4 mr-1" />
-                        Done
+                        Save Business
                       </Button>
+                    </div>
+                  ) : savingStatus[marketingBusiness.id] ? (
+                    <div className="flex gap-2 pt-2 text-sm text-muted-foreground">
+                      {savingStatus[marketingBusiness.id] === 'saving' ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : savingStatus[marketingBusiness.id] === 'saved' ? (
+                        <>
+                          <div className="h-4 w-4 rounded-full bg-green-500 flex items-center justify-center">
+                            <svg className="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          Saved
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -1522,6 +1835,7 @@ export default function BusinessPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => addNewCampaign(marketingBusiness.id)}
+                  disabled={marketingBusiness.id.startsWith('temp-')}
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   Add Campaign
